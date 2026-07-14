@@ -1,0 +1,321 @@
+generator client {
+  provider        = "prisma-client-js"
+  previewFeatures = ["postgresqlExtensions"]
+}
+
+datasource db {
+  provider   = "postgresql"
+  url        = env("DATABASE_URL")
+  extensions = [vector]
+}
+
+model Organization {
+  id        String   @id @default(uuid())
+  name      String
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  users        User[]
+  agents       Agent[]
+  campaigns    Campaign[]
+  contacts     Contact[]
+  callLogs     CallLog[]
+  knowledgeBases KnowledgeBase[]
+  phoneNumbers PhoneNumber[]
+  integrations Integration[]
+  apiKeys      ApiKey[]
+  auditLogs    AuditLog[]
+  settings     Settings?
+  whatsappSettings WhatsAppSettings?
+  whatsappLogs WhatsAppMessageLog[]
+}
+
+model User {
+  id             String   @id @default(uuid())
+  organizationId String?
+  email          String   @unique
+  password       String
+  fullName       String
+  role           String   @default("member") // owner | admin | member
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  organization Organization? @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  auditLogs    AuditLog[]
+}
+
+model Agent {
+  id             String   @id @default(uuid())
+  organizationId String
+  name           String
+  description    String?
+  llmProvider    String   @default("openai") // openai, anthropic, gemini, groq
+  model          String   @default("gpt-4o")
+  temperature    Float    @default(0.7)
+  maxTokens      Int      @default(1000)
+  voiceProvider  String   @default("elevenlabs") // elevenlabs, sarvam, cartesia, azure
+  voiceId        String
+  language       String   @default("en")
+  firstMessage   String?
+  status         String   @default("active")
+  
+  // Advanced Telephony/Voice logic
+  silenceTimeout Int      @default(3000)
+  interruptions  Boolean  @default(true)
+  transferEnabled Boolean @default(false)
+  transferNumber  String?
+  vapiAssistantId String?
+
+
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  organization   Organization     @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  prompts        PromptVersion[]
+  campaigns      Campaign[]
+  callLogs       CallLog[]
+  knowledgeBases KnowledgeBase[]
+  whatsappTemplates WhatsAppTemplate[]
+}
+
+model PromptVersion {
+  id                 String   @id @default(uuid())
+  agentId            String
+  version            Int      @default(1)
+  systemPrompt       String
+  businessContext    String?
+  callObjective      String?
+  qualificationRules String?
+  closingInstructions String?
+  fallbackRules      String?
+  complianceRules    String?
+  isActive           Boolean  @default(false)
+  createdAt          DateTime @default(now())
+
+  agent              Agent    @relation(fields: [agentId], references: [id], onDelete: Cascade)
+}
+
+model KnowledgeBase {
+  id             String   @id @default(uuid())
+  organizationId String
+  name           String
+  description    String?
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  documents      Document[]
+  agents         Agent[]
+}
+
+model Document {
+  id              String   @id @default(uuid())
+  knowledgeBaseId String
+  type            String   // pdf, docx, txt, csv, url
+  name            String
+  content         String   // extracted text
+  status          String   @default("processing") // processing, active, failed
+  createdAt       DateTime @default(now())
+
+  knowledgeBase   KnowledgeBase @relation(fields: [knowledgeBaseId], references: [id], onDelete: Cascade)
+  embeddings      DocumentEmbedding[]
+}
+
+model DocumentEmbedding {
+  id         String   @id @default(uuid())
+  documentId String
+  content    String   // The text chunk
+  embedding  Unsupported("vector(1536)")?
+  createdAt  DateTime @default(now())
+
+  document   Document @relation(fields: [documentId], references: [id], onDelete: Cascade)
+}
+
+model Campaign {
+  id             String   @id @default(uuid())
+  organizationId String
+  agentId        String
+  name           String
+  status         String   @default("draft") // draft, scheduled, running, paused, completed
+  businessHours  String?  // JSON string
+  callLimits     Int?     // Max calls per hour/day
+  scheduledAt    DateTime?
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  agent          Agent        @relation(fields: [agentId], references: [id], onDelete: Cascade)
+  contacts       Contact[]
+  callLogs       CallLog[]
+}
+
+model Contact {
+  id             String   @id @default(uuid())
+  organizationId String
+  campaignId     String?
+  name           String?
+  phone          String
+  email          String?
+  company        String?
+  loanAmount     Float?
+  loanType       String?
+  status         String   @default("pending") // pending, called, connected, failed
+  customFields   String?  // JSON string
+  notes          String?
+  tags           String?  // comma-separated
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  campaign       Campaign?    @relation(fields: [campaignId], references: [id], onDelete: SetNull)
+  callLogs       CallLog[]
+  whatsappLogs   WhatsAppMessageLog[]
+}
+
+model CallLog {
+  id             String   @id @default(uuid())
+  organizationId String
+  agentId        String?
+  campaignId     String?
+  contactId      String?
+  phone          String
+  direction      String   @default("outbound") // inbound | outbound
+  status         String   @default("completed") // ringing, in-progress, completed, failed, no-answer, busy
+  providerCallId String?  @unique
+  duration       Int      @default(0)
+  cost           Float    @default(0)
+  outcome        String?
+  interested     Boolean  @default(false)
+  leadScore      Int?
+  recordingUrl   String?
+  transcript     String?  // JSON array of utterances or raw text
+  summary        String?
+  customerIntent String?
+  nextAction     String?
+  objections     String?
+  startedAt      DateTime @default(now())
+  endedAt        DateTime?
+
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  agent          Agent?       @relation(fields: [agentId], references: [id], onDelete: SetNull)
+  campaign       Campaign?    @relation(fields: [campaignId], references: [id], onDelete: SetNull)
+  contact        Contact?     @relation(fields: [contactId], references: [id], onDelete: SetNull)
+  callEvents     CallEvent[]
+  whatsappLogs   WhatsAppMessageLog[]
+}
+
+model CallEvent {
+  id        String   @id @default(uuid())
+  callLogId String
+  type      String   // start, end, tool_call, error, interrupt
+  payload   String?  // JSON string
+  createdAt DateTime @default(now())
+
+  callLog   CallLog  @relation(fields: [callLogId], references: [id], onDelete: Cascade)
+}
+
+model PhoneNumber {
+  id             String   @id @default(uuid())
+  organizationId String
+  number         String
+  provider       String   @default("twilio") // twilio, exotel
+  sid            String?
+  status         String   @default("active")
+  createdAt      DateTime @default(now())
+
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+}
+
+model Integration {
+  id             String   @id @default(uuid())
+  organizationId String
+  type           String   // n8n, webhook, salesforce, etc
+  config         String   // JSON string, encrypted
+  isActive       Boolean  @default(true)
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+}
+
+model ApiKey {
+  id             String   @id @default(uuid())
+  organizationId String
+  provider       String   // openai, anthropic, twilio, deepgram, etc
+  keyEncrypted   String   // AES encrypted
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+}
+
+model AuditLog {
+  id             String   @id @default(uuid())
+  organizationId String
+  userId         String?
+  action         String
+  resource       String
+  details        String?  // JSON string
+  ipAddress      String?
+  createdAt      DateTime @default(now())
+
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  user           User?        @relation(fields: [userId], references: [id], onDelete: SetNull)
+}
+
+model Settings {
+  id             String   @id @default(uuid())
+  organizationId String   @unique
+  theme          String   @default("system")
+  timezone       String   @default("UTC")
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+}
+
+model WhatsAppSettings {
+  id             String   @id @default(uuid())
+  organizationId String   @unique
+  apiKey         String
+  apiToken       String
+  accountSid     String
+  subdomain      String   @default("api.exotel.com")
+  whatsappNumber String   // The verified Exotel WhatsApp sender number
+  isActive       Boolean  @default(true)
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+}
+
+model WhatsAppTemplate {
+  id             String   @id @default(uuid())
+  agentId        String
+  triggerOutcome String   // e.g., 'interested', 'follow_up', 'no_answer', 'all'
+  templateName   String?  // Name of pre-approved meta template
+  messageBody    String?  // Used if fallback or raw text
+  isActive       Boolean  @default(true)
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  agent          Agent    @relation(fields: [agentId], references: [id], onDelete: Cascade)
+}
+
+model WhatsAppMessageLog {
+  id             String   @id @default(uuid())
+  organizationId String
+  contactId      String?
+  callLogId      String?
+  recipientPhone String
+  templateName   String?
+  messageBody    String?
+  status         String   @default("sent") // sent, delivered, read, failed
+  error          String?
+  messageId      String?  // Meta message ID
+  createdAt      DateTime @default(now())
+
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  contact        Contact?     @relation(fields: [contactId], references: [id], onDelete: SetNull)
+  callLog        CallLog?     @relation(fields: [callLogId], references: [id], onDelete: SetNull)
+}

@@ -1,0 +1,27 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "Frontend (Next.js)",
+      "runtimeExecutable": "npm",
+      "runtimeArgs": ["run", "dev"],
+      "cwd": "frontend",
+      "port": 3000,
+      "autoPort": true
+    },
+    {
+      "name": "Supabase Local (API)",
+      "runtimeExecutable": "npx",
+      "runtimeArgs": ["supabase", "start"],
+      "cwd": "backend",
+      "port": 54321
+    },
+    {
+      "name": "Supabase Studio",
+      "runtimeExecutable": "npx",
+      "runtimeArgs": ["supabase", "start"],
+      "cwd": "backend",
+      "port": 54323
+    }
+  ]
+}
