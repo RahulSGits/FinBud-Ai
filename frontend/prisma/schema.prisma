@@ -65,6 +65,7 @@ model Agent {
   transferEnabled Boolean @default(false)
   transferNumber  String?
   vapiAssistantId String?
+  systemPrompt    String?
 
 
   createdAt      DateTime @default(now())
@@ -140,6 +141,9 @@ model Campaign {
   businessHours  String?  // JSON string
   callLimits     Int?     // Max calls per hour/day
   scheduledAt    DateTime?
+  totalContacts  Int      @default(0)
+  completedCalls Int      @default(0)
+  failedCalls    Int      @default(0)
   createdAt      DateTime @default(now())
   updatedAt      DateTime @updatedAt
 
@@ -186,6 +190,10 @@ model CallLog {
   cost           Float    @default(0)
   outcome        String?
   interested     Boolean  @default(false)
+  leadStatus     String?  // interested, not_interested, follow_up, etc
+  followUp       Boolean  @default(false)
+  sentiment      String?
+  exotelCallSid  String?
   leadScore      Int?
   recordingUrl   String?
   transcript     String?  // JSON array of utterances or raw text
@@ -201,6 +209,7 @@ model CallLog {
   campaign       Campaign?    @relation(fields: [campaignId], references: [id], onDelete: SetNull)
   contact        Contact?     @relation(fields: [contactId], references: [id], onDelete: SetNull)
   callEvents     CallEvent[]
+  callTranscript CallTranscript?
   whatsappLogs   WhatsAppMessageLog[]
 }
 
@@ -212,6 +221,17 @@ model CallEvent {
   createdAt DateTime @default(now())
 
   callLog   CallLog  @relation(fields: [callLogId], references: [id], onDelete: Cascade)
+}
+
+model CallTranscript {
+  id             String   @id @default(uuid())
+  callLogId      String   @unique
+  transcript     String?
+  messagesJson   String?  // JSON formatted messages
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  callLog        CallLog  @relation(fields: [callLogId], references: [id], onDelete: Cascade)
 }
 
 model PhoneNumber {

@@ -55,8 +55,8 @@ export async function POST(req: NextRequest) {
     const res = NextResponse.json({ user: { id: user.id, email: user.email, fullName: user.fullName } });
     res.cookies.set('finbud_token', token, { httpOnly: true, path: '/', maxAge: 60 * 60 * 24 * 7, sameSite: 'lax' });
     return res;
-  } catch (e) {
+  } catch (e: any) {
     console.error(e);
-    return NextResponse.json({ error: 'Server error' }, { status: 500 });
+    return NextResponse.json({ error: e.message || 'Server error' }, { status: 500 });
   }
 }

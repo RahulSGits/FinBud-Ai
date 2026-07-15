@@ -40,7 +40,8 @@ export async function POST(req: NextRequest) {
           silenceTimeout: body.silenceTimeout ? Number(body.silenceTimeout) : 10,
           interruptions: body.interruptions ?? true,
           transferEnabled: !!body.transferEnabled, 
-          transferNumber: body.transferNumber || null 
+          transferNumber: body.transferNumber || null,
+          systemPrompt: body.systemPrompt || ''
         },
       });
 
@@ -80,7 +81,7 @@ export async function POST(req: NextRequest) {
             model: {
               provider: agent.llmProvider || 'openai',
               model: agent.model || 'gpt-4o-mini',
-              messages: [{ role: 'system', content: body.systemPrompt || 'You are an AI assistant.' }],
+              messages: [{ role: 'system', content: agent.systemPrompt || 'You are an AI assistant.' }],
             },
             voice: {
               provider: agent.voiceProvider || 'elevenlabs',
@@ -143,6 +144,7 @@ export async function PUT(req: NextRequest) {
         interruptions: body.interruptions !== undefined ? body.interruptions : undefined,
         transferEnabled: body.transferEnabled !== undefined ? !!body.transferEnabled : undefined,
         transferNumber: body.transferNumber !== undefined ? body.transferNumber : undefined,
+        systemPrompt: body.systemPrompt !== undefined ? body.systemPrompt : undefined,
       }
     });
 
@@ -164,6 +166,7 @@ export async function PUT(req: NextRequest) {
               model: {
                 provider: updatedAgent.llmProvider || 'openai',
                 model: updatedAgent.model || 'gpt-4o-mini',
+                messages: [{ role: 'system', content: updatedAgent.systemPrompt || 'You are an AI assistant.' }],
               },
               voice: {
                 provider: updatedAgent.voiceProvider || 'elevenlabs',

@@ -6,21 +6,43 @@ export async function POST(req: NextRequest) {
     const payload = await req.json();
     const event = payload.message;
 
-    if (!event || event.type !== 'end-of-call-report') {
-      // We only care about end of call reports for now
+    if (!event) return NextResponse.json({ ok: true });
+
+    // Extract callLogId
+    const callLogId = event.call?.metadata?.callLogId;
+    if (!callLogId) {
+      console.error('Vapi webhook missing callLogId metadata:', event.type);
+      return NextResponse.json({ error: 'Missing callLogId' }, { status: 400 });
+    }
+
+    if (event.type === 'status-update') {
+      // Handle call.started, call.ringing, call.in-progress, call.ended
+      const status = event.status; // 'ringing', 'in-progress', 'ended'
+      await db.callLog.update({
+        where: { id: callLogId },
+        data: { status }
+      });
       return NextResponse.json({ ok: true });
     }
 
-    // Call details from Vapi
-    const callLogId = event.call?.metadata?.callLogId;
-    if (!callLogId) {
-      console.error('Vapi webhook missing callLogId metadata');
-      return NextResponse.json({ error: 'Missing callLogId' }, { status: 400 });
+    if (event.type === 'transcript-update' || event.type === 'transcript') {
+      // We can append to the CallTranscript model
+      const transcriptText = event.transcript || event.text || '';
+      await db.callTranscript.upsert({
+        where: { callLogId: callLogId },
+        create: { callLogId, transcript: transcriptText },
+        update: { transcript: transcriptText }
+      });
+      return NextResponse.json({ ok: true });
+    }
+
+    if (event.type !== 'end-of-call-report') {
+      return NextResponse.json({ ok: true });
     }
 
     const durationSec = event.call?.endedAt && event.call?.startedAt 
       ? Math.floor((new Date(event.call.endedAt).getTime() - new Date(event.call.startedAt).getTime()) / 1000) 
-      : 0;
+      : (event.endedReason ? 0 : 0);
       
     const recordingUrl = event.recordingUrl;
     const summary = event.summary;
@@ -38,11 +60,12 @@ export async function POST(req: NextRequest) {
       data: {
         status: 'completed',
         duration: durationSec,
-        outcome: 'Completed', // or map Vapi's endedReason
+        outcome: event.endedReason || 'Completed',
         recordingUrl: recordingUrl || null,
         transcript: transcriptJSON,
         summary: summary || null,
         interested: interested,
+        leadStatus: interested ? 'interested' : 'not_interested',
         // If Vapi structured data was used, extract it:
         customerIntent: analysis.customAnalysis?.intent || null,
         nextAction: analysis.customAnalysis?.nextAction || null,

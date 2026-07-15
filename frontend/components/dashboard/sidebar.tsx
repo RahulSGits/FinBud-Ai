@@ -20,6 +20,7 @@ export const NAV = [
 ];
 
 export const SECONDARY = [
+  { href: '/dashboard/sarvam-test', label: 'Sarvam Testing', icon: Zap },
   { href: '/dashboard/settings', label: 'Settings', icon: Settings },
 ];
 

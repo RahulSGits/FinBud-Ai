@@ -108,7 +108,10 @@ export default function AgentWhatsAppSettings({ agentId }: { agentId: string }) 
               onChange={e => setNewTemplate({...newTemplate, templateName: e.target.value})}
               className="w-full px-4 py-2 bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-lg text-sm"
             />
-            <p className="text-xs text-slate-500 mt-1">If specified, we will send this official template using [Name] as the single variable.</p>
+            <p className="text-xs text-slate-500 mt-2">
+              Message sent when the lead says &quot;yes&quot; or answers affirmatively.
+              Can include variables like {'{name}'} and {'{payment_link}'}.
+            </p>
           </div>
 
           <div>

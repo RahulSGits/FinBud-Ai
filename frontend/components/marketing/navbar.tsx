@@ -7,10 +7,12 @@ import { usePathname } from 'next/navigation';
 import { useState } from 'react';
 import { cn } from '@/lib/utils';
 import { ThemeToggle } from '@/components/theme-toggle';
+import { useAuth } from '@/lib/auth-context';
 
 export function Navbar() {
   const pathname = usePathname();
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
+  const { user } = useAuth();
 
   return (
     <header className="fixed top-0 w-full z-50 flex items-center justify-between px-6 lg:px-12 h-20 border-b border-slate-200 dark:border-white/5 bg-slate-50 dark:bg-[#020617]/80 backdrop-blur-md">
@@ -30,14 +32,24 @@ export function Navbar() {
       </nav>
       <div className="flex items-center gap-4">
         <ThemeToggle />
-        <Link href="/login">
-          <Button variant="ghost" className="text-slate-600 dark:text-white hover:text-slate-900 dark:hover:text-white hover:bg-slate-100 dark:hover:bg-white/10 hidden sm:inline-flex">Log in</Button>
-        </Link>
-        <Link href="/register" className="hidden sm:block">
-          <Button className="bg-emerald-600 hover:bg-emerald-500 text-white border-0 shadow-lg shadow-emerald-500/20 rounded-full px-6">
-            Start Free Trial
-          </Button>
-        </Link>
+        {user ? (
+          <Link href="/dashboard" className="hidden sm:block">
+            <Button className="bg-emerald-600 hover:bg-emerald-500 text-white border-0 shadow-lg shadow-emerald-500/20 rounded-full px-6">
+              Go to Dashboard
+            </Button>
+          </Link>
+        ) : (
+          <>
+            <Link href="/login">
+              <Button variant="ghost" className="text-slate-600 dark:text-white hover:text-slate-900 dark:hover:text-white hover:bg-slate-100 dark:hover:bg-white/10 hidden sm:inline-flex">Log in</Button>
+            </Link>
+            <Link href="/register" className="hidden sm:block">
+              <Button className="bg-emerald-600 hover:bg-emerald-500 text-white border-0 shadow-lg shadow-emerald-500/20 rounded-full px-6">
+                Start Free Trial
+              </Button>
+            </Link>
+          </>
+        )}
 
         {/* Mobile Menu Toggle */}
         <button 
@@ -60,12 +72,20 @@ export function Navbar() {
             <a href="/docs" target="_blank" rel="noopener noreferrer" onClick={() => setIsMobileMenuOpen(false)} className="flex items-center gap-1.5 text-slate-600 dark:text-white"><BookOpen className="w-3.5 h-3.5" />Docs</a>
           </nav>
           <div className="flex flex-col gap-3 pt-4 mt-2 border-t border-slate-200 dark:border-white/10">
-            <Link href="/login" onClick={() => setIsMobileMenuOpen(false)}>
-              <Button variant="outline" className="w-full border-slate-300 dark:border-white/10 text-slate-700 dark:text-white">Log in</Button>
-            </Link>
-            <Link href="/register" onClick={() => setIsMobileMenuOpen(false)}>
-              <Button className="w-full bg-emerald-600 hover:bg-emerald-500 text-white border-0 rounded-full">Start Free Trial</Button>
-            </Link>
+            {user ? (
+              <Link href="/dashboard" onClick={() => setIsMobileMenuOpen(false)}>
+                <Button className="w-full bg-emerald-600 hover:bg-emerald-500 text-white border-0 rounded-full">Go to Dashboard</Button>
+              </Link>
+            ) : (
+              <>
+                <Link href="/login" onClick={() => setIsMobileMenuOpen(false)}>
+                  <Button variant="outline" className="w-full border-slate-300 dark:border-white/10 text-slate-700 dark:text-white">Log in</Button>
+                </Link>
+                <Link href="/register" onClick={() => setIsMobileMenuOpen(false)}>
+                  <Button className="w-full bg-emerald-600 hover:bg-emerald-500 text-white border-0 rounded-full">Start Free Trial</Button>
+                </Link>
+              </>
+            )}
           </div>
         </div>
       )}
