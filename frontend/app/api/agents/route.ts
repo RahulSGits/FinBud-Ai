@@ -32,7 +32,7 @@ export async function POST(req: NextRequest) {
           model: body.model || 'gpt-4o',
           temperature: body.temperature !== undefined ? Number(body.temperature) : 0.7,
           maxTokens: body.maxTokens ? Number(body.maxTokens) : 500,
-          voiceProvider: body.voiceProvider || 'elevenlabs',
+          voiceProvider: body.voiceProvider || 'exote',
           voiceId: body.voiceId || 'priya', 
           language: body.language || 'en-US', 
           status: 'inactive', 
@@ -84,7 +84,7 @@ export async function POST(req: NextRequest) {
               messages: [{ role: 'system', content: agent.systemPrompt || 'You are an AI assistant.' }],
             },
             voice: {
-              provider: agent.voiceProvider || 'elevenlabs',
+              provider: agent.voiceProvider || 'exote',
               voiceId: agent.voiceId || 'eleven_turbo_v2',
             }
           })
@@ -169,7 +169,7 @@ export async function PUT(req: NextRequest) {
                 messages: [{ role: 'system', content: updatedAgent.systemPrompt || 'You are an AI assistant.' }],
               },
               voice: {
-                provider: updatedAgent.voiceProvider || 'elevenlabs',
+                provider: updatedAgent.voiceProvider || 'exote',
                 voiceId: updatedAgent.voiceId || 'eleven_turbo_v2',
               }
             })

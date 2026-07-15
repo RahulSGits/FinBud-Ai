@@ -32,7 +32,7 @@ const FEATURES = [
   {
     icon: Mic,
     title: 'Human-like Voice',
-    desc: 'Cloned voices with emotional inflection via Sarvam and Cartesia TTS engines.',
+    desc: 'Cloned voices with emotional inflection via Sarvam and Exote TTS engines.',
     color: 'from-emerald-500/20 to-teal-500/10',
     border: 'border-emerald-500/20',
   },

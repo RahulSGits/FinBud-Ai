@@ -46,7 +46,7 @@ export default function AgentBuilderPage() {
     model: 'gpt-4o',
     temperature: 0.7,
     maxTokens: 500,
-    voiceProvider: 'elevenlabs',
+    voiceProvider: 'exote',
     voiceId: 'priya',
     
     // Telephony & Advanced
@@ -272,8 +272,7 @@ export default function AgentBuilderPage() {
                   <div>
                     <label className="block text-sm font-medium text-slate-600 dark:text-slate-300 mb-1.5">Voice Provider</label>
                     <select value={agentData.voiceProvider} onChange={e => handleUpdate('voiceProvider', e.target.value)} className="w-full h-10 bg-slate-100 dark:bg-white/5 border border-slate-300 dark:border-white/10 text-slate-900 dark:text-white rounded-md px-3 text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500 appearance-none">
-                      <option value="elevenlabs">ElevenLabs (Most Natural)</option>
-                      <option value="cartesia">Cartesia (Low Latency Sonic)</option>
+                      <option value="exote">Exote</option>
                       <option value="sarvam">Sarvam (Indian Accents)</option>
                     </select>
                   </div>

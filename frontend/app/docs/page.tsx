@@ -723,7 +723,7 @@ export default function DocsPage() {
             <FeatureCard icon={BookOpen} title="Knowledge Base (RAG)" description="Upload docs, FAQs, URLs for agent context" status="live" />
             <FeatureCard icon={PhoneCall} title="Telephony / SIP" description="Connect Twilio, Exotel, or your own SIP trunks" status="live" />
             <FeatureCard icon={Megaphone} title="Bulk Campaigns" description="Outbound call campaigns with CSV uploads" status="live" />
-            <FeatureCard icon={Mic} title="Voice Cloning" description="Clone custom voices via ElevenLabs" status="soon" />
+            <FeatureCard icon={Mic} title="Voice Cloning" description="Clone custom voices via Exote" status="soon" />
             <FeatureCard icon={Globe} title="Web Search Tool" description="Real-time web search during calls" status="soon" />
           </div>
 
@@ -734,7 +734,7 @@ export default function DocsPage() {
             {[
               { step: 1, title: 'Create an Account', desc: 'Sign up at finbud.ai or use the demo credentials below. You\'ll get 100 free trial minutes to test everything out.' },
               { step: 2, title: 'Create Your First Agent', desc: 'Navigate to Dashboard → AI Agents → Create New Agent. Choose an industry template or start from scratch with a blank canvas.' },
-              { step: 3, title: 'Configure Voice & Prompt', desc: 'Write your system prompt, select a voice provider (ElevenLabs, Sarvam AI, or Cartesia), and choose a language.' },
+              { step: 3, title: 'Configure Voice & Prompt', desc: 'Write your system prompt, select a voice provider (Exote, Sarvam AI, or Vapi), and choose a language.' },
               { step: 4, title: 'Add Knowledge', desc: 'Upload PDFs, add FAQ entries, or scrape website URLs to give your agent context about your business.' },
               { step: 5, title: 'Connect Telephony', desc: 'Add a phone number via Twilio or Exotel, or use Web Interface mode for browser-based testing.' },
               { step: 6, title: 'Launch!', desc: 'Deploy your agent and start making/receiving calls. Monitor performance in real-time from your dashboard.' },
@@ -767,7 +767,7 @@ const response = await fetch('/api/agents', {
     template_id: 'finance',
     prompt: 'You are a professional financial advisor...',
     greeting: 'Hello, this is Priya from FinEdge Wealth.',
-    voice_provider: 'elevenlabs',
+    voice_provider: 'exote',
     voice_id: 'priya',
     language: 'en-IN',
     status: 'active'
@@ -781,7 +781,7 @@ const response = await fetch('/api/agents', {
     "template_id": "finance",
     "prompt": "You are a professional financial advisor...",
     "greeting": "Hello, this is Priya from FinEdge Wealth.",
-    "voice_provider": "elevenlabs",
+    "voice_provider": "exote",
     "voice_id": "priya",
     "language": "en-IN"
   }'` },
@@ -795,7 +795,7 @@ response = requests.post(
         'template_id': 'finance',
         'prompt': 'You are a professional financial advisor...',
         'greeting': 'Hello, this is Priya from FinEdge Wealth.',
-        'voice_provider': 'elevenlabs',
+        'voice_provider': 'exote',
         'voice_id': 'priya',
         'language': 'en-IN',
     }
@@ -855,9 +855,9 @@ CONVERSATION FLOW:
           <DocTable
             headers={['Provider', 'Strengths', 'Languages']}
             rows={[
-              ['ElevenLabs (Premium)', 'Most natural, widest voice library', 'English, Hindi, Spanish, 25+ more'],
+              ['Exote (Premium)', 'Most natural, widest voice library', 'English, Hindi, Spanish, 25+ more'],
               ['Sarvam AI', 'Best for Indian languages', 'Hindi, Tamil, Telugu, Bengali, Marathi, + more'],
-              ['Cartesia', 'Ultra-low latency', 'English (US/UK)'],
+              ['Vapi Native', 'Ultra-low latency', 'English (US/UK)'],
             ]}
           />
 

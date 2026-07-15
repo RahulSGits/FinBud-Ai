@@ -94,7 +94,7 @@ export default function WhyPage() {
                   <Database className="w-6 h-6 text-amber-600 dark:text-amber-400" />
                 </div>
                 <h3 className="font-bold text-slate-900 dark:text-white mb-2">3. Emotional TTS</h3>
-                <p className="text-xs text-slate-600 dark:text-slate-400 text-center">Sarvam/Cartesia streams human-like audio back to the caller in &lt;200ms.</p>
+                <p className="text-xs text-slate-600 dark:text-slate-400 text-center">Sarvam/Exote streams human-like audio back to the caller in &lt;200ms.</p>
               </motion.div>
 
             </div>

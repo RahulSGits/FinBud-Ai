@@ -61,7 +61,7 @@ export async function POST(req: NextRequest) {
         messages: [{ role: 'system', content: agent.prompts?.[0]?.systemPrompt || 'You are an AI assistant.' }],
       },
       voice: {
-        provider: agent.voiceProvider || 'elevenlabs',
+        provider: agent.voiceProvider || 'exote',
         voiceId: agent.voiceId || 'eleven_turbo_v2',
       },
       metadata: { callLogId: callLog.id },
