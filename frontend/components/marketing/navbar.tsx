@@ -26,7 +26,6 @@ export function Navbar() {
         <Link href="/" className={cn("transition-colors", pathname === '/' ? "text-emerald-600 dark:text-emerald-400" : "text-slate-600 dark:text-white hover:text-emerald-600 dark:hover:text-emerald-400")}>Home</Link>
         <Link href="/why" className={cn("transition-colors", pathname === '/why' ? "text-emerald-600 dark:text-emerald-400" : "text-slate-600 dark:text-white hover:text-emerald-600 dark:hover:text-emerald-400")}>Why FinBud</Link>
         <Link href="/how-it-works" className={cn("transition-colors", pathname === '/how-it-works' ? "text-emerald-600 dark:text-emerald-400" : "text-slate-600 dark:text-white hover:text-emerald-600 dark:hover:text-emerald-400")}>How it Works</Link>
-        <Link href="/pricing" className={cn("transition-colors", pathname === '/pricing' ? "text-emerald-600 dark:text-emerald-400" : "text-slate-600 dark:text-white hover:text-emerald-600 dark:hover:text-emerald-400")}>Pricing</Link>
         <Link href="/faq" className={cn("transition-colors", pathname === '/faq' ? "text-emerald-600 dark:text-emerald-400" : "text-slate-600 dark:text-white hover:text-emerald-600 dark:hover:text-emerald-400")}>FAQ</Link>
         <a href="/docs" target="_blank" rel="noopener noreferrer" className="flex items-center gap-1 text-slate-600 dark:text-white hover:text-emerald-600 dark:hover:text-emerald-400 transition-colors"><BookOpen className="w-3.5 h-3.5" />Docs</a>
       </nav>
@@ -67,7 +66,6 @@ export function Navbar() {
             <Link href="/" onClick={() => setIsMobileMenuOpen(false)} className={cn("transition-colors", pathname === '/' ? "text-emerald-600 dark:text-emerald-400" : "text-slate-600 dark:text-white")}>Home</Link>
             <Link href="/why" onClick={() => setIsMobileMenuOpen(false)} className={cn("transition-colors", pathname === '/why' ? "text-emerald-600 dark:text-emerald-400" : "text-slate-600 dark:text-white")}>Why FinBud</Link>
             <Link href="/how-it-works" onClick={() => setIsMobileMenuOpen(false)} className={cn("transition-colors", pathname === '/how-it-works' ? "text-emerald-600 dark:text-emerald-400" : "text-slate-600 dark:text-white")}>How it Works</Link>
-            <Link href="/pricing" onClick={() => setIsMobileMenuOpen(false)} className={cn("transition-colors", pathname === '/pricing' ? "text-emerald-600 dark:text-emerald-400" : "text-slate-600 dark:text-white")}>Pricing</Link>
             <Link href="/faq" onClick={() => setIsMobileMenuOpen(false)} className={cn("transition-colors", pathname === '/faq' ? "text-emerald-600 dark:text-emerald-400" : "text-slate-600 dark:text-white")}>FAQ</Link>
             <a href="/docs" target="_blank" rel="noopener noreferrer" onClick={() => setIsMobileMenuOpen(false)} className="flex items-center gap-1.5 text-slate-600 dark:text-white"><BookOpen className="w-3.5 h-3.5" />Docs</a>
           </nav>

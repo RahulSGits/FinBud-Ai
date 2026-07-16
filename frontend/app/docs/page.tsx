@@ -40,11 +40,6 @@ const NAV_SECTIONS = [
     { id: 'api-calls', label: 'Calls API' },
     { id: 'api-webhooks', label: 'Webhooks' },
   ]},
-  { id: 'billing', label: 'Billing & Plans', icon: CreditCard, children: [
-    { id: 'plans', label: 'Subscription Plans' },
-    { id: 'credits', label: 'Credits System' },
-    { id: 'invoices', label: 'Invoices' },
-  ]},
   { id: 'security', label: 'Security', icon: Shield, children: [
     { id: 'data-privacy', label: 'Data Privacy' },
     { id: 'rls', label: 'Row Level Security' },
@@ -992,28 +987,6 @@ const agents = await response.json();` },
   "transcript": [...],
   "recording_url": "https://..."
 }`} language="json" />
-
-          {/* ─── BILLING ─── */}
-          <SectionHeading id="plans" icon={CreditCard}>Subscription Plans</SectionHeading>
-          <DocTable
-            headers={['Plan', 'Price (INR/mo)', 'Minutes', 'Agents', 'Concurrent Calls']}
-            rows={[
-              ['Starter', '₹2,999', '1,000', '3', '2'],
-              ['Pro', '₹5,999', '5,000', '10', '5'],
-              ['Business', '₹9,999', '20,000', '50', '20'],
-              ['Enterprise', '₹19,999', 'Unlimited', 'Unlimited', 'Unlimited'],
-            ]}
-          />
-
-          <SubHeading id="credits">Credits System</SubHeading>
-          <p className="text-slate-600 dark:text-slate-400 mb-4">
-            Credits are consumed based on call duration. <strong className="text-slate-900 dark:text-white">1 credit = 1 minute of call time.</strong> Credits are allocated monthly based on your subscription plan and reset at the beginning of each billing cycle.
-          </p>
-
-          <SubHeading id="invoices">Invoices</SubHeading>
-          <p className="text-slate-600 dark:text-slate-400 mb-4">
-            View and download your invoices from <strong className="text-slate-900 dark:text-white">Dashboard → Billing</strong>. All invoices are generated automatically and include GST details for Indian customers.
-          </p>
 
           {/* ─── SECURITY ─── */}
           <SectionHeading id="data-privacy" icon={Shield}>Data Privacy</SectionHeading>

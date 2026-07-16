@@ -15,7 +15,6 @@ import { ThemeToggle } from '@/components/theme-toggle';
 const NAV = [
   { href: '/admin', label: 'Overview', icon: LayoutDashboard },
   { href: '/admin/users', label: 'Users', icon: Users },
-  { href: '/admin/subscriptions', label: 'Subscriptions', icon: CreditCard },
   { href: '/admin/providers', label: 'API Providers', icon: Server },
   { href: '/admin/calls', label: 'Call Monitor', icon: Phone },
   { href: '/admin/audit', label: 'Audit Logs', icon: ScrollText },

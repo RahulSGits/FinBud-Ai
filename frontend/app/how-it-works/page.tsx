@@ -134,7 +134,7 @@ export default function HowItWorksPage() {
                     <div className="space-y-2">
                       <div className="bg-black/50 border border-slate-200 dark:border-white/5 rounded-lg p-3 flex items-center gap-3">
                         <FileText className="w-4 h-4 text-emerald-400" />
-                        <span className="text-sm text-slate-600 dark:text-slate-300 flex-1">Pricing_Guide_2024.pdf</span>
+                        <span className="text-sm text-slate-600 dark:text-slate-300 flex-1">Platform_Guide_2024.pdf</span>
                         <CheckCircle2 className="w-4 h-4 text-emerald-400" />
                       </div>
                       <div className="bg-black/50 border border-slate-200 dark:border-white/5 rounded-lg p-3 flex items-center gap-3">
@@ -254,7 +254,7 @@ export default function HowItWorksPage() {
                         </div>
                          <div className="flex gap-2">
                           <Bot className="w-4 h-4 text-emerald-600 dark:text-emerald-400 mt-1" />
-                          <div className="text-xs text-slate-600 dark:text-slate-300">&quot;I noticed you downloaded our pricing guide...&quot;</div>
+                          <div className="text-xs text-slate-600 dark:text-slate-300">&quot;I noticed you downloaded our platform guide...&quot;</div>
                         </div>
                       </div>
                     </div>

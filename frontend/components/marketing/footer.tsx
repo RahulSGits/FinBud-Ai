@@ -41,7 +41,6 @@ export function Footer() {
             <ul className="space-y-4">
               <li><Link href="/why" className="text-slate-600 dark:text-slate-400 hover:text-emerald-600 dark:hover:text-emerald-400 transition-colors">Why FinBud?</Link></li>
               <li><Link href="/how-it-works" className="text-slate-600 dark:text-slate-400 hover:text-emerald-600 dark:hover:text-emerald-400 transition-colors">How it Works</Link></li>
-              <li><Link href="/pricing" className="text-slate-600 dark:text-slate-400 hover:text-emerald-600 dark:hover:text-emerald-400 transition-colors">Pricing & Plans</Link></li>
               <li><Link href="/" className="text-slate-600 dark:text-slate-400 hover:text-emerald-600 dark:hover:text-emerald-400 transition-colors">Integrations</Link></li>
               <li><Link href="/" className="text-slate-600 dark:text-slate-400 hover:text-emerald-600 dark:hover:text-emerald-400 transition-colors">Security</Link></li>
             </ul>

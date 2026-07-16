@@ -78,7 +78,7 @@ export function WebCallDemo({ isOpen, onClose, defaultMode }: WebCallDemoProps) 
       
       const timer = setTimeout(() => {
         setStatus('connected');
-        const greeting = "Hi there! I'm Priya, the FinBud Support Agent. Ask me about our pricing, latency, or languages!";
+        const greeting = "Hi there! I'm Priya, the FinBud Support Agent. Ask me about our latency, languages, or features!";
         if (defaultMode === 'voice') speak(greeting);
         setTranscript([{ role: 'agent', text: greeting }]);
       }, 1000);
