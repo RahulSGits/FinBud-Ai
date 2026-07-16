@@ -22,17 +22,17 @@ export default async function ProvidersPage() {
         <h3 className="text-lg font-semibold text-slate-900 dark:text-white mb-4">API Configurations & Integrations</h3>
         <div className="space-y-4">
           {[
-            { name: 'Supabase Database', key: 'DATABASE_URL', isConfigured: !!process.env.DATABASE_URL && !process.env.DATABASE_URL.includes('placeholder') },
-            { name: 'Sarvam AI', key: 'SARVAM_API_KEY', isConfigured: !!process.env.SARVAM_API_KEY && !process.env.SARVAM_API_KEY.includes('placeholder') },
-            { name: 'Vapi Native', key: 'VAPI_API_KEY', isConfigured: !!process.env.VAPI_API_KEY && !process.env.VAPI_API_KEY.includes('placeholder') },
-            { name: 'Exote Voice', key: 'EXOTE_API_KEY', isConfigured: !!process.env.EXOTE_API_KEY && !process.env.EXOTE_API_KEY.includes('placeholder') || !!process.env.ELEVENLABS_API_KEY && !process.env.ELEVENLABS_API_KEY.includes('placeholder') },
-            { name: 'OpenAI (LLM)', key: 'OPENAI_API_KEY', isConfigured: !!process.env.OPENAI_API_KEY && !process.env.OPENAI_API_KEY.includes('placeholder') },
-            { name: 'Deepgram (STT)', key: 'DEEPGRAM_API_KEY', isConfigured: !!process.env.DEEPGRAM_API_KEY && !process.env.DEEPGRAM_API_KEY.includes('placeholder') },
+            { name: 'Supabase Database', desc: 'Primary database and authentication provider', isConfigured: !!process.env.DATABASE_URL && !process.env.DATABASE_URL.includes('placeholder') },
+            { name: 'Sarvam AI', desc: 'Text-to-speech for regional Indian languages', isConfigured: !!process.env.SARVAM_API_KEY && !process.env.SARVAM_API_KEY.includes('placeholder') },
+            { name: 'Vapi Native', desc: 'Real-time conversational voice infrastructure', isConfigured: !!process.env.VAPI_API_KEY && !process.env.VAPI_API_KEY.includes('placeholder') },
+            { name: 'Exote Voice', desc: 'Premium voice generation for global accents', isConfigured: !!process.env.EXOTE_API_KEY && !process.env.EXOTE_API_KEY.includes('placeholder') || !!process.env.ELEVENLABS_API_KEY && !process.env.ELEVENLABS_API_KEY.includes('placeholder') },
+            { name: 'OpenAI', desc: 'Foundational LLM for conversational intelligence', isConfigured: !!process.env.OPENAI_API_KEY && !process.env.OPENAI_API_KEY.includes('placeholder') },
+            { name: 'Deepgram', desc: 'Ultra-fast speech-to-text transcription', isConfigured: !!process.env.DEEPGRAM_API_KEY && !process.env.DEEPGRAM_API_KEY.includes('placeholder') },
           ].map((api, i) => (
             <div key={i} className="flex items-center justify-between p-4 bg-slate-50 dark:bg-slate-800/50 rounded-xl border border-slate-100 dark:border-white/5">
               <div>
                 <p className="font-medium text-slate-900 dark:text-white">{api.name}</p>
-                <p className="text-xs text-slate-500 dark:text-slate-400 font-mono mt-1">{api.key}</p>
+                <p className="text-xs text-slate-500 dark:text-slate-400 mt-1">{api.desc}</p>
               </div>
               <div>
                 {api.isConfigured ? (
