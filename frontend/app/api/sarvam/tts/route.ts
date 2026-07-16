@@ -1,5 +1,5 @@
 import { NextResponse } from 'next/server';
-import { SarvamAI } from 'sarvamai';
+import { SarvamAIClient } from 'sarvamai';
 
 export async function POST(req: Request) {
   try {
@@ -9,7 +9,7 @@ export async function POST(req: Request) {
       return NextResponse.json({ error: 'Text is required' }, { status: 400 });
     }
 
-    const client = new SarvamAI({
+    const client = new SarvamAIClient({
       apiSubscriptionKey: process.env.SARVAM_API_KEY || 'YOUR_SARVAM_API_KEY',
     });
 
