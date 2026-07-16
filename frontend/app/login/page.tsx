@@ -19,7 +19,13 @@ export default function LoginPage() {
   const router = useRouter();
 
   useEffect(() => {
-    if (user) router.replace('/dashboard');
+    if (user) {
+      if (user.role === 'admin') {
+        router.replace('/admin');
+      } else {
+        router.replace('/dashboard');
+      }
+    }
   }, [user, router]);
 
   const handleSubmit = async (e: React.FormEvent) => {

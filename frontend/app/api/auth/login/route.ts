@@ -13,11 +13,11 @@ export async function POST(req: NextRequest) {
       if (!admin) {
         const hashed = await bcrypt.hash('admin123', 10);
         admin = await db.user.create({
-          data: { email: 'admin@finbud.ai', password: hashed, fullName: 'Admin User' },
+          data: { email: 'admin@finbud.ai', password: hashed, fullName: 'Admin User', role: 'admin' },
         });
       }
       const token = await signToken({ userId: admin.id, email: admin.email });
-      const res = NextResponse.json({ user: { id: admin.id, email: admin.email, fullName: admin.fullName } });
+      const res = NextResponse.json({ user: { id: admin.id, email: admin.email, fullName: admin.fullName, role: admin.role } });
       res.cookies.set('finbud_token', token, { httpOnly: true, path: '/', maxAge: 60 * 60 * 24 * 7, sameSite: 'lax' });
       return res;
     }
@@ -38,7 +38,7 @@ export async function POST(req: NextRequest) {
         }
       }
       const token = await signToken({ userId: demo.id, email: demo.email });
-      const res = NextResponse.json({ user: { id: demo.id, email: demo.email, fullName: demo.fullName } });
+      const res = NextResponse.json({ user: { id: demo.id, email: demo.email, fullName: demo.fullName, role: demo.role } });
       res.cookies.set('finbud_token', token, { httpOnly: true, path: '/', maxAge: 60 * 60 * 24 * 7, sameSite: 'lax' });
       return res;
     }
@@ -52,7 +52,7 @@ export async function POST(req: NextRequest) {
 
 
     const token = await signToken({ userId: user.id, email: user.email });
-    const res = NextResponse.json({ user: { id: user.id, email: user.email, fullName: user.fullName } });
+    const res = NextResponse.json({ user: { id: user.id, email: user.email, fullName: user.fullName, role: user.role } });
     res.cookies.set('finbud_token', token, { httpOnly: true, path: '/', maxAge: 60 * 60 * 24 * 7, sameSite: 'lax' });
     return res;
   } catch (e: any) {
