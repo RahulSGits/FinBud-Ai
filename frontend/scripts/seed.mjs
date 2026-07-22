@@ -36,7 +36,11 @@ async function main() {
       status: 'active',
       systemPrompt: 'You are Priya, a helpful sales assistant.',
       firstMessage: 'Hello, this is Priya from FinBud!',
-      vapiAssistantId: 'test-vapi-id'
+      // Left null on purpose: a placeholder here makes Vapi reject every call
+      // with "assistantId must be a UUID". The real id is written when the
+      // agent is synced to the provider via POST/PUT /api/agents.
+      externalAgentId: null,
+      vapiAssistantId: null
     }
   });
 

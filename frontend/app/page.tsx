@@ -2,7 +2,7 @@
 
 import { useState, useEffect } from 'react';
 import Link from 'next/link';
-import { motion, AnimatePresence, useMotionValue, useSpring, useTransform } from 'framer-motion';
+import { motion, AnimatePresence, useMotionValue, useSpring, useTransform } from 'motion/react';
 import {
   ArrowRight, Bot, PhoneCall, PlayCircle, Mic, Globe, Zap, Settings,
   CheckCircle2, BarChart3, Users, Shield, Clock, Star, ChevronRight,

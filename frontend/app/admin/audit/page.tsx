@@ -2,7 +2,7 @@ import { getAuthUser } from '@/lib/auth-server';
 import { redirect } from 'next/navigation';
 import { db } from '@/lib/db';
 import { ShieldAlert } from 'lucide-react';
-import { MotionWrapper, MotionList, MotionItem } from '@/components/admin/motion-wrapper';
+import { MotionWrapper, MotionList, MotionItem } from '@/components/motion-wrapper';
 import { AuditLogChart } from '@/components/admin/audit-log-charts';
 
 export const dynamic = 'force-dynamic';
@@ -89,49 +89,49 @@ export default async function AdminAuditPage() {
       <MotionWrapper delay={0.3}>
         <div className="bg-white dark:bg-[#0f172a] rounded-2xl shadow-sm border border-slate-200 dark:border-white/5 p-6 overflow-hidden">
           <h3 className="text-lg font-semibold text-slate-900 dark:text-white mb-4">Audit History</h3>
-          <div className="overflow-x-auto">
-            <table className="w-full text-left border-collapse">
-              <thead>
-                <tr className="border-b border-slate-100 dark:border-white/5 text-slate-500 dark:text-slate-400 text-xs font-semibold uppercase">
-                  <th className="py-3 px-4">User</th>
-                  <th className="py-3 px-4">Org</th>
-                  <th className="py-3 px-4">Action</th>
-                  <th className="py-3 px-4">Resource</th>
-                  <th className="py-3 px-4">IP Address</th>
-                  <th className="py-3 px-4">Date</th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-slate-100 dark:divide-white/5 text-slate-700 dark:text-slate-300 text-sm">
-                {auditLogs.map((log) => (
-                  <tr key={log.id} className="hover:bg-slate-50 dark:hover:bg-slate-800/50">
-                    <td className="py-3 px-4 font-medium text-slate-900 dark:text-white">
-                      {log.user ? `${log.user.fullName} (${log.user.email})` : 'System'}
-                    </td>
-                    <td className="py-3 px-4">
-                      {log.organization?.name || 'Global'}
-                    </td>
-                    <td className="py-3 px-4">
-                      <span className="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-semibold bg-indigo-50 text-indigo-700 dark:bg-indigo-500/10 dark:text-indigo-400">
-                        {log.action}
+          <MotionList className="flex flex-col gap-3">
+            {auditLogs.length === 0 ? (
+              <div className="py-12 text-center">
+                <ShieldAlert className="w-8 h-8 text-slate-400 mx-auto mb-2" />
+                <div className="text-slate-500">No audit logs found.</div>
+              </div>
+            ) : (
+              auditLogs.map((log) => (
+                <MotionItem key={log.id} className="flex flex-col sm:flex-row sm:items-center justify-between p-4 rounded-xl bg-slate-50 dark:bg-slate-800/20 border border-slate-100 dark:border-white/5 hover:border-indigo-500/30 transition-all gap-4">
+                  <div className="flex flex-col gap-1">
+                    <div className="flex items-center gap-2">
+                      <span className="font-semibold text-slate-900 dark:text-white">
+                        {log.user ? log.user.fullName : 'System'}
                       </span>
-                    </td>
-                    <td className="py-3 px-4 text-xs font-mono">{log.resource}</td>
-                    <td className="py-3 px-4 font-mono text-xs">{log.ipAddress || 'N/A'}</td>
-                    <td className="py-3 px-4 text-xs text-slate-500">
-                      {log.createdAt.toLocaleString()}
-                    </td>
-                  </tr>
-                ))}
-                {auditLogs.length === 0 && (
-                  <tr>
-                    <td colSpan={6} className="py-8 text-center text-slate-500">
-                      No audit logs found.
-                    </td>
-                  </tr>
-                )}
-              </tbody>
-            </table>
-          </div>
+                      <span className="text-xs text-slate-500">
+                        {log.user ? `(${log.user.email})` : ''}
+                      </span>
+                      <span className="inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-bold tracking-wide uppercase bg-indigo-100 text-indigo-700 dark:bg-indigo-500/10 dark:text-indigo-400">
+                        {log.action.replace(/_/g, ' ')}
+                      </span>
+                    </div>
+                    <div className="flex items-center gap-3 text-xs text-slate-500">
+                      <span className="font-mono bg-slate-200 dark:bg-slate-900/50 px-1.5 py-0.5 rounded">
+                        {log.resource}
+                      </span>
+                      <span>•</span>
+                      <span>{log.organization?.name || 'Global'}</span>
+                    </div>
+                  </div>
+                  <div className="flex flex-col items-start sm:items-end gap-1">
+                    <span className="font-mono text-xs text-slate-400">
+                      {log.ipAddress || 'IP N/A'}
+                    </span>
+                    <span className="text-xs text-slate-500">
+                      {log.createdAt.toLocaleString('en-US', {
+                        month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit'
+                      })}
+                    </span>
+                  </div>
+                </MotionItem>
+              ))
+            )}
+          </MotionList>
         </div>
       </MotionWrapper>
     </div>

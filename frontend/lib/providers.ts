@@ -6,7 +6,8 @@ import { decryptConfig } from './crypto';
 // Catalog of supported providers (the keys each one needs).
 export const PROVIDER_CATALOG = [
   { slug: 'openai', name: 'OpenAI', category: 'llm', fields: ['api_key'] },
-  { slug: 'vapi', name: 'Vapi', category: 'telephony', fields: ['api_key'] },
+  { slug: 'vapi', name: 'Vapi', category: 'voice', fields: ['api_key'] },
+  { slug: 'omnidimension', name: 'OmniDimension', category: 'voice', fields: ['api_key'] },
   { slug: 'exotel', name: 'Exotel', category: 'telephony', fields: ['api_key', 'api_token', 'sid', 'from_number'] }
 ];
 

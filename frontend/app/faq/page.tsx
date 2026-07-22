@@ -3,7 +3,7 @@
 import { useState } from 'react';
 import { Navbar } from '@/components/marketing/navbar';
 import { Footer } from '@/components/marketing/footer';
-import { motion, AnimatePresence } from 'framer-motion';
+import { motion, AnimatePresence } from 'motion/react';
 import { ChevronDown, ChevronUp, Phone, PlayCircle } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { WebCallDemo } from '@/components/marketing/web-call-demo';

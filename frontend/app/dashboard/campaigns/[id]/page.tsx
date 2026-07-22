@@ -1,7 +1,7 @@
 'use client';
 import { useState, useEffect, useCallback, useRef } from 'react';
 import { useParams } from 'next/navigation';
-import { Upload, Plus, Trash2, Loader2, PhoneCall, Pencil, Check, X, Users } from 'lucide-react';
+import { Upload, Plus, Trash2, Loader2, PhoneCall, Pencil, Check, X, Users, Pause, Square } from 'lucide-react';
 import Header from '@/components/dashboard/header';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -18,8 +18,14 @@ const OUTCOME_STYLE: Record<string, string> = {
 };
 const STATUS_STYLE: Record<string, string> = {
   pending: 'text-slate-600 dark:text-slate-300 bg-slate-100 dark:bg-white/5',
+  draft: 'text-slate-600 dark:text-slate-300 bg-slate-100 dark:bg-white/5',
   calling: 'text-amber-700 dark:text-amber-300 bg-amber-100 dark:bg-amber-500/10',
+  running: 'text-emerald-700 dark:text-emerald-300 bg-emerald-100 dark:bg-emerald-500/10',
+  retry: 'text-amber-700 dark:text-amber-300 bg-amber-100 dark:bg-amber-500/10',
+  paused: 'text-amber-700 dark:text-amber-300 bg-amber-100 dark:bg-amber-500/10',
   called: 'text-emerald-700 dark:text-emerald-300 bg-emerald-100 dark:bg-emerald-500/10',
+  completed: 'text-emerald-700 dark:text-emerald-300 bg-emerald-100 dark:bg-emerald-500/10',
+  exhausted: 'text-slate-500 dark:text-slate-400 bg-slate-100 dark:bg-white/5',
   failed: 'text-red-700 dark:text-red-300 bg-red-100 dark:bg-red-500/10',
 };
 
@@ -46,6 +52,23 @@ export default function CampaignDetailPage() {
     if (lr.ok) { const all = await lr.json(); setCalls(all.filter((c: any) => c.campaignId === id)); }
   }, [id]);
   useEffect(() => { load(); }, [load]);
+
+  // While a campaign is running, refresh progress and nudge the server-side
+  // runner. The campaign keeps dialling without this — a scheduler hitting
+  // /api/campaigns/tick drives it in production; this only makes an open
+  // dashboard feel live.
+  useEffect(() => {
+    if (campaign?.status !== 'running') return;
+
+    let cancelled = false;
+    const timer = setInterval(async () => {
+      if (cancelled) return;
+      await fetch('/api/campaigns/tick', { method: 'POST' }).catch(() => {});
+      if (!cancelled) await load();
+    }, 5000);
+
+    return () => { cancelled = true; clearInterval(timer); };
+  }, [campaign?.status, load]);
 
   const addContacts = async (rows: { name: string; phone: string }[]) => {
     if (!rows.length) { toast.error('No valid contacts'); return; }
@@ -89,21 +112,31 @@ export default function CampaignDetailPage() {
     setEditingName(false); toast.success('Renamed'); load();
   };
 
-  const startBulk = async () => {
-    if (!campaign.agentId) { toast.error('This campaign has no agent assigned'); return; }
-    const pending = contacts.filter(c => c.status === 'pending');
-    if (!pending.length) { toast.error('No pending contacts to call'); return; }
+  // Dialling is driven by the server-side campaign runner, not a loop in the
+  // browser — closing this tab no longer stops the campaign.
+  const control = async (action: 'start' | 'pause' | 'resume' | 'stop') => {
     setBusy(true);
-    let started = 0, failed = 0, lastErr = '';
     try {
-      for (const c of pending.slice(0, 50)) {
-        const r = await fetch('/api/calls/start', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ agentId: campaign.agentId, phone: c.phone, campaignId: id }) });
-        if (r.ok) started++; else { failed++; lastErr = (await r.json().catch(() => ({}))).error || ''; }
+      const r = await fetch(`/api/campaigns/${id}/control`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action }),
+      });
+      const d = await r.json().catch(() => ({}));
+
+      if (!r.ok) {
+        toast.error(d.error || `Could not ${action} campaign`);
+      } else if (d.notice) {
+        toast.warning(d.notice);
+      } else if (action === 'start' || action === 'resume') {
+        toast.success(`Campaign running — dialling ${d.dialled} call${d.dialled === 1 ? '' : 's'}`);
+      } else {
+        toast.success(`Campaign ${d.status}`);
       }
-      if (started) toast.success(`Started ${started} calls${failed ? `, ${failed} failed` : ''}`);
-      else toast.error(lastErr || 'Could not start calls (configure Twilio in Admin → API Providers)');
       await load();
-    } finally { setBusy(false); }
+    } finally {
+      setBusy(false);
+    }
   };
 
   if (!campaign) return <div className="min-h-screen bg-slate-50 dark:bg-[#020617] flex items-center justify-center text-slate-600 dark:text-slate-500"><Loader2 className="w-6 h-6 animate-spin" /></div>;
@@ -126,7 +159,26 @@ export default function CampaignDetailPage() {
           ) : (
             <h2 className="text-xl font-bold text-slate-900 dark:text-white flex items-center gap-2">{campaign.name}<button onClick={() => setEditingName(true)} className="p-1.5 text-slate-500 dark:text-slate-400 hover:text-slate-700 dark:hover:text-white"><Pencil className="w-4 h-4" /></button></h2>
           )}
-          <Button onClick={startBulk} disabled={busy} className="bg-emerald-600 hover:bg-emerald-500 text-white gap-2">{busy ? <Loader2 className="w-4 h-4 animate-spin" /> : <PhoneCall className="w-4 h-4" />} Start Bulk Calls</Button>
+          <div className="flex items-center gap-2">
+            <span className={cn('px-2.5 py-1 rounded-full text-xs font-medium capitalize', STATUS_STYLE[campaign.status] || STATUS_STYLE.pending)}>
+              {campaign.status}
+            </span>
+            {campaign.status === 'running' ? (
+              <>
+                <Button onClick={() => control('pause')} disabled={busy} variant="outline" className="border-slate-200 dark:border-white/10 text-slate-700 dark:text-slate-200 gap-2">
+                  {busy ? <Loader2 className="w-4 h-4 animate-spin" /> : <Pause className="w-4 h-4" />} Pause
+                </Button>
+                <Button onClick={() => control('stop')} disabled={busy} variant="ghost" className="text-red-500 hover:bg-red-500/10 gap-2">
+                  <Square className="w-4 h-4" /> Stop
+                </Button>
+              </>
+            ) : (
+              <Button onClick={() => control(campaign.status === 'paused' ? 'resume' : 'start')} disabled={busy} className="bg-emerald-600 hover:bg-emerald-500 text-white gap-2">
+                {busy ? <Loader2 className="w-4 h-4 animate-spin" /> : <PhoneCall className="w-4 h-4" />}
+                {campaign.status === 'paused' ? 'Resume' : 'Start Campaign'}
+              </Button>
+            )}
+          </div>
         </div>
 
         {/* Stats */}
