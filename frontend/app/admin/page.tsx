@@ -2,6 +2,9 @@ import { db } from '@/lib/db';
 import { getAuthUser } from '@/lib/auth-server';
 import { redirect } from 'next/navigation';
 import { Users, Brain, Phone, MessageSquare, Megaphone, Activity } from 'lucide-react';
+import { GlobalOperations } from '@/components/admin/global-operations';
+import { IN_FLIGHT_STATUSES } from '@/lib/providers/voice';
+import { ActivityHeatmap } from '@/components/admin/activity-heatmap';
 
 export const dynamic = 'force-dynamic';
 
@@ -17,6 +20,10 @@ export default async function AdminOverviewPage() {
     totalCalls,
     totalCampaigns,
     interestedLeads,
+    liveCalls,
+    calls24h,
+    connected24h,
+    runningCampaigns,
   ] = await Promise.all([
     db.user.count(),
     db.agent.count(),
@@ -24,7 +31,20 @@ export default async function AdminOverviewPage() {
     db.callLog.count(),
     db.campaign.count(),
     db.callLog.count({ where: { interested: true } }),
+    // Live activity for the Global Operations panel.
+    db.callLog.count({ where: { status: { in: IN_FLIGHT_STATUSES } } }),
+    db.callLog.count({ where: { startedAt: { gte: new Date(Date.now() - 86_400_000) } } }),
+    db.callLog.count({
+      where: {
+        startedAt: { gte: new Date(Date.now() - 86_400_000) },
+        duration: { gt: 0 },
+      },
+    }),
+    db.campaign.count({ where: { status: 'running' } }),
   ]);
+
+  // Share of calls in the last 24h that actually connected.
+  const connectRate = calls24h > 0 ? Math.round((connected24h / calls24h) * 100) : 0;
 
   const cards = [
     { title: 'Total Users', value: totalUsers, icon: Users, color: 'text-indigo-500', bg: 'bg-indigo-500/10' },
@@ -44,7 +64,7 @@ export default async function AdminOverviewPage() {
 
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
         {cards.map((c, i) => (
-          <div key={i} className="bg-white dark:bg-[#0f172a] p-6 rounded-2xl shadow-sm border border-slate-200 dark:border-white/5 flex items-center gap-4">
+          <div key={i} className="glass-card p-6 rounded-2xl flex items-center gap-4 transition-transform hover:-translate-y-1">
             <div className={`w-12 h-12 rounded-xl flex items-center justify-center ${c.bg}`}>
               <c.icon className={`w-6 h-6 ${c.color}`} />
             </div>
@@ -56,6 +76,19 @@ export default async function AdminOverviewPage() {
         ))}
       </div>
       
+      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 mt-8">
+        <div className="lg:col-span-2">
+          <GlobalOperations
+            liveCalls={liveCalls}
+            calls24h={calls24h}
+            connectRate={connectRate}
+            runningCampaigns={runningCampaigns}
+          />
+        </div>
+        <div className="lg:col-span-1">
+          <ActivityHeatmap />
+        </div>
+      </div>
 
     </div>
   );

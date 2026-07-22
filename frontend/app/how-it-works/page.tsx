@@ -2,7 +2,7 @@
 
 import { Navbar } from '@/components/marketing/navbar';
 import { Footer } from '@/components/marketing/footer';
-import { motion } from 'framer-motion';
+import { motion } from 'motion/react';
 import { Bot, UploadCloud, Phone, Play, CheckCircle2, ChevronRight, Sliders, Database, FileText } from 'lucide-react';
 
 export default function HowItWorksPage() {

@@ -11,6 +11,8 @@ import { toast } from 'sonner';
 import { useAuth } from '@/lib/auth-context';
 import { useRouter } from 'next/navigation';
 import { KnowledgeManagerModal } from '@/components/dashboard/knowledge-manager-modal';
+import { SplineBrain } from '@/components/dashboard/spline-brain';
+import { MotionList, MotionItem } from '@/components/motion-wrapper';
 
 const STEPS = [
   { id: 1, title: 'Identity & Prompt', icon: Settings2 },
@@ -41,12 +43,17 @@ export default function AgentBuilderPage() {
     fallbackRules: '',
     complianceRules: '',
     
+    // Voice orchestration provider (vapi | omnidimension)
+    provider: 'vapi',
+
     // Voice & LLM
     llmProvider: 'openai',
     model: 'gpt-4o',
     temperature: 0.7,
     maxTokens: 500,
-    voiceProvider: 'exote',
+    sttProvider: 'deepgram',
+    sttModel: 'nova-3',
+    voiceProvider: '11labs',
     voiceId: 'priya',
     
     // Telephony & Advanced
@@ -80,11 +87,18 @@ export default function AgentBuilderPage() {
     });
     setLoading(false);
     
+    const d = await res.json().catch(() => ({}));
+
     if (!res.ok) {
-      const d = await res.json();
       toast.error('Failed to save agent. ' + (d.error || ''));
     } else {
-      toast.success('Agent saved successfully!');
+      // The agent is stored either way; a sync failure only means the provider
+      // side is not live yet, so say so instead of reporting a clean success.
+      if (d.syncError) {
+        toast.warning(`Agent saved, but provider sync failed: ${d.syncError}`);
+      } else {
+        toast.success('Agent saved successfully!');
+      }
       router.push('/dashboard/agents');
     }
   };
@@ -130,54 +144,61 @@ export default function AgentBuilderPage() {
           
           {/* STEP 1: IDENTITY & PROMPT BUILDER */}
           {step === 1 && (
-            <div className="space-y-6 animate-in fade-in slide-in-from-right-4">
-              <div>
-                <h2 className="text-xl font-bold text-slate-900 dark:text-white mb-1">Identity & Prompt Builder</h2>
-                <p className="text-sm text-slate-600 dark:text-slate-400">Construct a highly structured system prompt for enterprise readiness.</p>
-              </div>
-              
-              <div className="grid md:grid-cols-2 gap-6 pb-6 border-b border-slate-200 dark:border-white/10">
+            <div className="grid lg:grid-cols-3 gap-8 animate-in fade-in slide-in-from-right-4">
+              <div className="lg:col-span-2 space-y-6">
                 <div>
-                  <label className="block text-sm font-medium text-slate-600 dark:text-slate-300 mb-1.5">Agent Name</label>
-                  <Input value={agentData.name} onChange={e => handleUpdate('name', e.target.value)} placeholder="e.g., Sales Rep Priya" className="bg-slate-100 dark:bg-white/5 border-slate-300 dark:border-white/10 text-slate-900 dark:text-white" />
-                </div>
-                <div>
-                  <label className="block text-sm font-medium text-slate-600 dark:text-slate-300 mb-1.5">First Message (Greeting)</label>
-                  <Input value={agentData.greeting} onChange={e => handleUpdate('greeting', e.target.value)} placeholder="Hello! How can I help?" className="bg-slate-100 dark:bg-white/5 border-slate-300 dark:border-white/10 text-slate-900 dark:text-white" />
-                </div>
-              </div>
-
-              <div className="space-y-5">
-                <div>
-                  <label className="block text-sm font-semibold text-slate-900 dark:text-white mb-1.5">Base System Prompt</label>
-                  <Textarea value={agentData.systemPrompt} onChange={e => handleUpdate('systemPrompt', e.target.value)} rows={3} placeholder="You are a professional sales assistant for..." className="bg-slate-50 dark:bg-white/5 border-slate-200 dark:border-white/10 text-sm" />
+                  <h2 className="text-xl font-bold text-slate-900 dark:text-white mb-1">Identity & Prompt Builder</h2>
+                  <p className="text-sm text-slate-600 dark:text-slate-400">Construct a highly structured system prompt for enterprise readiness.</p>
                 </div>
                 
-                <div className="grid md:grid-cols-2 gap-5">
-                  <div>
-                    <label className="block text-sm font-semibold text-slate-900 dark:text-white mb-1.5">Business Context & Company Info</label>
-                    <Textarea value={agentData.businessContext} onChange={e => handleUpdate('businessContext', e.target.value)} rows={3} placeholder="We sell AI automation software..." className="bg-slate-50 dark:bg-white/5 border-slate-200 dark:border-white/10 text-sm" />
-                  </div>
-                  <div>
-                    <label className="block text-sm font-semibold text-slate-900 dark:text-white mb-1.5">Call Objective</label>
-                    <Textarea value={agentData.callObjective} onChange={e => handleUpdate('callObjective', e.target.value)} rows={3} placeholder="To book a 15-minute discovery call..." className="bg-slate-50 dark:bg-white/5 border-slate-200 dark:border-white/10 text-sm" />
-                  </div>
-                  <div>
-                    <label className="block text-sm font-semibold text-slate-900 dark:text-white mb-1.5">Qualification Rules</label>
-                    <Textarea value={agentData.qualificationRules} onChange={e => handleUpdate('qualificationRules', e.target.value)} rows={3} placeholder="Only transfer if the user is a business owner..." className="bg-slate-50 dark:bg-white/5 border-slate-200 dark:border-white/10 text-sm" />
-                  </div>
-                  <div>
-                    <label className="block text-sm font-semibold text-slate-900 dark:text-white mb-1.5">Closing Instructions</label>
-                    <Textarea value={agentData.closingInstructions} onChange={e => handleUpdate('closingInstructions', e.target.value)} rows={3} placeholder="End the call by wishing them a great day..." className="bg-slate-50 dark:bg-white/5 border-slate-200 dark:border-white/10 text-sm" />
-                  </div>
-                  <div>
-                    <label className="block text-sm font-semibold text-slate-900 dark:text-white mb-1.5">Fallback & Objection Handling</label>
-                    <Textarea value={agentData.fallbackRules} onChange={e => handleUpdate('fallbackRules', e.target.value)} rows={3} placeholder="If they say it's too expensive, respond with..." className="bg-slate-50 dark:bg-white/5 border-slate-200 dark:border-white/10 text-sm" />
-                  </div>
-                  <div>
-                    <label className="block text-sm font-semibold text-amber-600 dark:text-amber-400 mb-1.5 flex items-center gap-1"><AlertTriangle className="w-4 h-4"/> Compliance Rules</label>
-                    <Textarea value={agentData.complianceRules} onChange={e => handleUpdate('complianceRules', e.target.value)} rows={3} placeholder="Never make promises about exact interest rates..." className="bg-amber-50 dark:bg-amber-500/5 border-amber-200 dark:border-amber-500/20 text-sm" />
-                  </div>
+                <MotionList className="grid md:grid-cols-2 gap-6 pb-6 border-b border-slate-200 dark:border-white/10">
+                  <MotionItem>
+                    <label className="block text-sm font-medium text-slate-600 dark:text-slate-300 mb-1.5">Agent Name</label>
+                    <Input value={agentData.name} onChange={e => handleUpdate('name', e.target.value)} placeholder="e.g., Sales Rep Priya" className="bg-slate-100 dark:bg-white/5 border-slate-300 dark:border-white/10 text-slate-900 dark:text-white" />
+                  </MotionItem>
+                  <MotionItem>
+                    <label className="block text-sm font-medium text-slate-600 dark:text-slate-300 mb-1.5">First Message (Greeting)</label>
+                    <Input value={agentData.greeting} onChange={e => handleUpdate('greeting', e.target.value)} placeholder="Hello! How can I help?" className="bg-slate-100 dark:bg-white/5 border-slate-300 dark:border-white/10 text-slate-900 dark:text-white" />
+                  </MotionItem>
+                </MotionList>
+
+                <div className="space-y-5">
+                  <MotionItem>
+                    <label className="block text-sm font-semibold text-slate-900 dark:text-white mb-1.5">Base System Prompt</label>
+                    <Textarea value={agentData.systemPrompt} onChange={e => handleUpdate('systemPrompt', e.target.value)} rows={3} placeholder="You are a professional sales assistant for..." className="bg-slate-50 dark:bg-white/5 border-slate-200 dark:border-white/10 text-sm" />
+                  </MotionItem>
+                  
+                  <MotionList className="grid md:grid-cols-2 gap-5">
+                    <MotionItem>
+                      <label className="block text-sm font-semibold text-slate-900 dark:text-white mb-1.5">Business Context & Company Info</label>
+                      <Textarea value={agentData.businessContext} onChange={e => handleUpdate('businessContext', e.target.value)} rows={3} placeholder="We sell AI automation software..." className="bg-slate-50 dark:bg-white/5 border-slate-200 dark:border-white/10 text-sm" />
+                    </MotionItem>
+                    <MotionItem>
+                      <label className="block text-sm font-semibold text-slate-900 dark:text-white mb-1.5">Call Objective</label>
+                      <Textarea value={agentData.callObjective} onChange={e => handleUpdate('callObjective', e.target.value)} rows={3} placeholder="To book a 15-minute discovery call..." className="bg-slate-50 dark:bg-white/5 border-slate-200 dark:border-white/10 text-sm" />
+                    </MotionItem>
+                    <MotionItem>
+                      <label className="block text-sm font-semibold text-slate-900 dark:text-white mb-1.5">Qualification Rules</label>
+                      <Textarea value={agentData.qualificationRules} onChange={e => handleUpdate('qualificationRules', e.target.value)} rows={3} placeholder="Only transfer if the user is a business owner..." className="bg-slate-50 dark:bg-white/5 border-slate-200 dark:border-white/10 text-sm" />
+                    </MotionItem>
+                    <MotionItem>
+                      <label className="block text-sm font-semibold text-slate-900 dark:text-white mb-1.5">Closing Instructions</label>
+                      <Textarea value={agentData.closingInstructions} onChange={e => handleUpdate('closingInstructions', e.target.value)} rows={3} placeholder="End the call by wishing them a great day..." className="bg-slate-50 dark:bg-white/5 border-slate-200 dark:border-white/10 text-sm" />
+                    </MotionItem>
+                    <MotionItem>
+                      <label className="block text-sm font-semibold text-slate-900 dark:text-white mb-1.5">Fallback & Objection Handling</label>
+                      <Textarea value={agentData.fallbackRules} onChange={e => handleUpdate('fallbackRules', e.target.value)} rows={3} placeholder="If they say it's too expensive, respond with..." className="bg-slate-50 dark:bg-white/5 border-slate-200 dark:border-white/10 text-sm" />
+                    </MotionItem>
+                    <MotionItem>
+                      <label className="block text-sm font-semibold text-amber-600 dark:text-amber-400 mb-1.5 flex items-center gap-1"><AlertTriangle className="w-4 h-4"/> Compliance Rules</label>
+                      <Textarea value={agentData.complianceRules} onChange={e => handleUpdate('complianceRules', e.target.value)} rows={3} placeholder="Never make promises about exact interest rates..." className="bg-amber-50 dark:bg-amber-500/5 border-amber-200 dark:border-amber-500/20 text-sm" />
+                    </MotionItem>
+                  </MotionList>
+                </div>
+              </div>
+              <div className="hidden lg:block lg:col-span-1">
+                <div className="sticky top-24">
+                  <SplineBrain />
                 </div>
               </div>
             </div>
@@ -229,6 +250,33 @@ export default function AgentBuilderPage() {
                 <p className="text-sm text-slate-600 dark:text-slate-400">Select the cognitive engine and vocal characteristics.</p>
               </div>
               
+              {/* Orchestration Provider */}
+              <div className="space-y-4">
+                <h3 className="text-sm font-semibold text-slate-900 dark:text-white uppercase tracking-wider flex items-center gap-2"><Cpu className="w-4 h-4"/> Orchestration Provider</h3>
+                <div className="grid md:grid-cols-2 gap-6">
+                  <div>
+                    <label className="block text-sm font-medium text-slate-600 dark:text-slate-300 mb-1.5">Voice Platform</label>
+                    <select value={agentData.provider} onChange={e => handleUpdate('provider', e.target.value)} className="w-full h-10 bg-slate-100 dark:bg-white/5 border border-slate-300 dark:border-white/10 text-slate-900 dark:text-white rounded-md px-3 text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500 appearance-none">
+                      <option value="vapi">Vapi</option>
+                      <option value="omnidimension">OmniDimension</option>
+                    </select>
+                    <p className="text-xs text-slate-500 mt-1">Handles telephony, speech and LLM routing. Switchable per agent.</p>
+                  </div>
+                  <div>
+                    <label className="block text-sm font-medium text-slate-600 dark:text-slate-300 mb-1.5">Speech Recognition</label>
+                    <select value={agentData.sttProvider} onChange={e => handleUpdate('sttProvider', e.target.value)} className="w-full h-10 bg-slate-100 dark:bg-white/5 border border-slate-300 dark:border-white/10 text-slate-900 dark:text-white rounded-md px-3 text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500 appearance-none">
+                      <option value="deepgram">Deepgram</option>
+                      <option value="assembly-ai">AssemblyAI</option>
+                      <option value="gladia">Gladia</option>
+                      <option value="azure">Azure</option>
+                      <option value="google">Google</option>
+                    </select>
+                  </div>
+                </div>
+              </div>
+
+              <div className="h-px bg-slate-200 dark:bg-white/10" />
+
               {/* LLM Engine */}
               <div className="space-y-4">
                 <h3 className="text-sm font-semibold text-slate-900 dark:text-white uppercase tracking-wider flex items-center gap-2"><Cpu className="w-4 h-4"/> Cognitive Engine</h3>
@@ -272,7 +320,11 @@ export default function AgentBuilderPage() {
                   <div>
                     <label className="block text-sm font-medium text-slate-600 dark:text-slate-300 mb-1.5">Voice Provider</label>
                     <select value={agentData.voiceProvider} onChange={e => handleUpdate('voiceProvider', e.target.value)} className="w-full h-10 bg-slate-100 dark:bg-white/5 border border-slate-300 dark:border-white/10 text-slate-900 dark:text-white rounded-md px-3 text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500 appearance-none">
-                      <option value="exote">Exote</option>
+                      <option value="11labs">ElevenLabs</option>
+                      <option value="cartesia">Cartesia (Low latency)</option>
+                      <option value="openai">OpenAI</option>
+                      <option value="deepgram">Deepgram</option>
+                      <option value="azure">Azure</option>
                       <option value="sarvam">Sarvam (Indian Accents)</option>
                     </select>
                   </div>
@@ -380,6 +432,7 @@ export default function AgentBuilderPage() {
                   <div><span className="text-xs text-slate-600 dark:text-slate-500 block mb-1">Language</span><span className="text-sm text-slate-900 dark:text-white font-medium capitalize">{agentData.language}</span></div>
                 </div>
                 <div className="grid grid-cols-2 gap-4 pb-4 border-b border-slate-200 dark:border-white/5">
+                  <div><span className="text-xs text-slate-600 dark:text-slate-500 block mb-1">Orchestration</span><span className="text-sm text-slate-900 dark:text-white font-medium capitalize">{agentData.provider} · {agentData.sttProvider}</span></div>
                   <div><span className="text-xs text-slate-600 dark:text-slate-500 block mb-1">LLM Engine</span><span className="text-sm text-slate-900 dark:text-white font-medium capitalize">{agentData.llmProvider} ({agentData.model})</span></div>
                   <div><span className="text-xs text-slate-600 dark:text-slate-500 block mb-1">Voice Profile</span><span className="text-sm text-slate-900 dark:text-white font-medium capitalize">{agentData.voiceId} ({agentData.voiceProvider})</span></div>
                 </div>

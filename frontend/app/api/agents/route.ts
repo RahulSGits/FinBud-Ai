@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getAuthUser } from '@/lib/auth-server';
 import { db } from '@/lib/db';
+import { agentToConfig, getVoiceProvider } from '@/lib/providers/voice';
 
 export async function GET() {
   const user = await getAuthUser();
@@ -25,14 +26,17 @@ export async function POST(req: NextRequest) {
     let agent = await db.$transaction(async (tx) => {
       const newAgent = await tx.agent.create({
         data: { 
-          organizationId: user.organizationId!, 
-          name: body.name || 'Unnamed Agent', 
-          description: body.description, 
+          organizationId: user.organizationId!,
+          name: body.name || 'Unnamed Agent',
+          description: body.description,
+          provider: body.provider || 'vapi',
+          sttProvider: body.sttProvider || null,
+          sttModel: body.sttModel || null,
           llmProvider: body.llmProvider || 'openai',
           model: body.model || 'gpt-4o',
           temperature: body.temperature !== undefined ? Number(body.temperature) : 0.7,
           maxTokens: body.maxTokens ? Number(body.maxTokens) : 500,
-          voiceProvider: body.voiceProvider || 'exote',
+          voiceProvider: body.voiceProvider || '11labs',
           voiceId: body.voiceId || 'priya', 
           language: body.language || 'en-US', 
           status: 'inactive', 
@@ -62,51 +66,30 @@ export async function POST(req: NextRequest) {
       return newAgent;
     });
 
-    // Create persistent assistant in Vapi
+    // Sync the agent to whichever voice provider it targets. A sync failure
+    // must not lose the agent the user just authored, so it is non-fatal.
+    let syncError: string | null = null;
     try {
-      // Import dynamically to avoid top-level dependency issues
-      const { getApiKey } = await import('@/lib/providers');
-      const vapiKey = await getApiKey('vapi', 'VAPI_API_KEY');
-      
-      if (vapiKey) {
-        const vapiRes = await fetch('https://api.vapi.ai/assistant', {
-          method: 'POST',
-          headers: {
-            'Authorization': `Bearer ${vapiKey}`,
-            'Content-Type': 'application/json'
+      const provider = getVoiceProvider(agent.provider);
+      if (await provider.isConfigured()) {
+        const { externalAgentId } = await provider.createAgent(agentToConfig(agent));
+        agent = await db.agent.update({
+          where: { id: agent.id },
+          data: {
+            externalAgentId,
+            // Keep the legacy column populated for older Vapi rows.
+            vapiAssistantId: provider.id === 'vapi' ? externalAgentId : agent.vapiAssistantId,
           },
-          body: JSON.stringify({
-            name: agent.name,
-            firstMessage: agent.firstMessage || 'Hello!',
-            model: {
-              provider: agent.llmProvider || 'openai',
-              model: agent.model || 'gpt-4o-mini',
-              messages: [{ role: 'system', content: agent.systemPrompt || 'You are an AI assistant.' }],
-            },
-            voice: {
-              provider: agent.voiceProvider || 'exote',
-              voiceId: agent.voiceId || 'eleven_turbo_v2',
-            }
-          })
         });
-        
-        if (vapiRes.ok) {
-          const vapiData = await vapiRes.json();
-          if (vapiData.id) {
-            agent = await db.agent.update({
-              where: { id: agent.id },
-              data: { vapiAssistantId: vapiData.id }
-            });
-          }
-        } else {
-          console.error('Failed to create Vapi assistant:', await vapiRes.text());
-        }
+      } else {
+        syncError = `${provider.name} is not configured; agent saved as draft.`;
       }
-    } catch (vapiErr) {
-      console.error('Error syncing with Vapi:', vapiErr);
+    } catch (err: any) {
+      syncError = err?.message || 'Provider sync failed';
+      console.error('Error syncing agent with provider:', err);
     }
 
-    return NextResponse.json(agent, { status: 201 });
+    return NextResponse.json({ ...agent, syncError }, { status: 201 });
   } catch (e) {
     console.error(e);
     return NextResponse.json({ error: 'Failed to create agent' }, { status: 500 });
@@ -131,6 +114,9 @@ export async function PUT(req: NextRequest) {
       data: {
         name: body.name !== undefined ? body.name : undefined,
         description: body.description !== undefined ? body.description : undefined,
+        provider: body.provider !== undefined ? body.provider : undefined,
+        sttProvider: body.sttProvider !== undefined ? body.sttProvider : undefined,
+        sttModel: body.sttModel !== undefined ? body.sttModel : undefined,
         llmProvider: body.llmProvider !== undefined ? body.llmProvider : undefined,
         model: body.model !== undefined ? body.model : undefined,
         temperature: body.temperature !== undefined ? Number(body.temperature) : undefined,
@@ -148,39 +134,35 @@ export async function PUT(req: NextRequest) {
       }
     });
 
-    // Sync with Vapi if a vapiAssistantId exists and we might be updating fields
-    if (updatedAgent.vapiAssistantId) {
-      try {
-        const { getApiKey } = await import('@/lib/providers');
-        const vapiKey = await getApiKey('vapi', 'VAPI_API_KEY');
-        if (vapiKey) {
-          await fetch(`https://api.vapi.ai/assistant/${updatedAgent.vapiAssistantId}`, {
-            method: 'PATCH',
-            headers: {
-              'Authorization': `Bearer ${vapiKey}`,
-              'Content-Type': 'application/json'
+    // Push the change to the provider, creating the remote agent if this row
+    // has never been synced (e.g. it was saved while keys were missing).
+    let agent = updatedAgent;
+    let syncError: string | null = null;
+    try {
+      const provider = getVoiceProvider(agent.provider);
+      if (await provider.isConfigured()) {
+        const config = agentToConfig(agent);
+        const externalId = agent.externalAgentId || agent.vapiAssistantId;
+
+        if (externalId) {
+          await provider.updateAgent(externalId, config);
+        } else {
+          const { externalAgentId } = await provider.createAgent(config);
+          agent = await db.agent.update({
+            where: { id: agent.id },
+            data: {
+              externalAgentId,
+              vapiAssistantId: provider.id === 'vapi' ? externalAgentId : agent.vapiAssistantId,
             },
-            body: JSON.stringify({
-              name: updatedAgent.name,
-              firstMessage: updatedAgent.firstMessage || 'Hello!',
-              model: {
-                provider: updatedAgent.llmProvider || 'openai',
-                model: updatedAgent.model || 'gpt-4o-mini',
-                messages: [{ role: 'system', content: updatedAgent.systemPrompt || 'You are an AI assistant.' }],
-              },
-              voice: {
-                provider: updatedAgent.voiceProvider || 'exote',
-                voiceId: updatedAgent.voiceId || 'eleven_turbo_v2',
-              }
-            })
           });
         }
-      } catch (err) {
-        console.error('Failed to sync agent update with Vapi:', err);
       }
+    } catch (err: any) {
+      syncError = err?.message || 'Provider sync failed';
+      console.error('Failed to sync agent update with provider:', err);
     }
 
-    return NextResponse.json(updatedAgent);
+    return NextResponse.json({ ...agent, syncError });
   } catch (e) {
     console.error(e);
     return NextResponse.json({ error: 'Failed to update agent' }, { status: 500 });
@@ -197,7 +179,18 @@ export async function DELETE(req: NextRequest) {
   
   const agent = await db.agent.findFirst({ where: { id, organizationId: user.organizationId } });
   if (!agent) return NextResponse.json({ error: 'Not found' }, { status: 404 });
-  
+
+  // Best-effort cleanup of the provider-side agent; never block local deletion.
+  const externalId = agent.externalAgentId || agent.vapiAssistantId;
+  if (externalId) {
+    try {
+      const provider = getVoiceProvider(agent.provider);
+      if (await provider.isConfigured()) await provider.deleteAgent(externalId);
+    } catch (err) {
+      console.error('Failed to delete provider agent:', err);
+    }
+  }
+
   await db.agent.delete({ where: { id } });
   return NextResponse.json({ ok: true });
 }

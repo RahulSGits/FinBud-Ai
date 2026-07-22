@@ -5,6 +5,7 @@ import { Input } from '@/components/ui/input';
 import { Button } from '@/components/ui/button';
 import Header from '@/components/dashboard/header';
 import { cn } from '@/lib/utils';
+import { MotionList, MotionItem, MotionWrapper } from '@/components/motion-wrapper';
 import { toast } from 'sonner';
 import { useAuth } from '@/lib/auth-context';
 
@@ -28,17 +29,50 @@ function WhatsAppModal({ target, template, company, onClose, onSent }: { target:
     } finally { setSending(false); }
   };
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4" onClick={onClose}>
-      <div className="w-full max-w-md bg-white dark:bg-[#0a1128] border border-slate-200 dark:border-white/10 rounded-2xl p-5" onClick={e => e.stopPropagation()}>
-        <div className="flex items-center gap-3 mb-4">
-          <div className="w-9 h-9 rounded-xl bg-emerald-500/10 flex items-center justify-center"><MessageCircle className="w-5 h-5 text-emerald-500" /></div>
-          <div className="flex-1"><h3 className="text-slate-900 dark:text-white font-semibold text-sm">Send WhatsApp</h3><p className="text-xs text-slate-600 dark:text-slate-500">to {target.customerName ? `${target.customerName} · ` : ''}{target.phone}</p></div>
-          <button onClick={onClose} className="text-slate-500 dark:text-slate-400 hover:text-slate-700 dark:hover:text-white"><X className="w-4 h-4" /></button>
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-4" onClick={onClose}>
+      <div className="absolute inset-0 bg-slate-900/60 backdrop-blur-sm" />
+      <div 
+        className="w-full max-w-md bg-white/70 dark:bg-[#0f172a]/80 backdrop-blur-xl border border-white/20 dark:border-white/10 rounded-3xl p-6 shadow-2xl relative z-10" 
+        onClick={e => e.stopPropagation()}
+      >
+        <div className="flex items-start justify-between mb-5">
+          <div className="flex items-center gap-3">
+            <div className="w-10 h-10 rounded-2xl bg-gradient-to-br from-emerald-400 to-emerald-600 flex items-center justify-center shadow-lg shadow-emerald-500/20">
+              <MessageCircle className="w-5 h-5 text-white" />
+            </div>
+            <div>
+              <h3 className="text-slate-900 dark:text-white font-semibold">Send WhatsApp</h3>
+              <p className="text-xs text-slate-500 dark:text-slate-400">
+                to {target.customerName ? <span className="font-medium text-slate-700 dark:text-slate-300">{target.customerName}</span> : ''} {target.customerName && '·'} {target.phone}
+              </p>
+            </div>
+          </div>
+          <button onClick={onClose} className="w-8 h-8 flex items-center justify-center rounded-full bg-slate-100 dark:bg-white/5 text-slate-500 dark:text-slate-400 hover:bg-slate-200 dark:hover:bg-white/10 hover:text-slate-900 dark:hover:text-white transition-colors">
+            <X className="w-4 h-4" />
+          </button>
         </div>
-        <textarea value={msg} onChange={e => setMsg(e.target.value)} rows={5} className="w-full rounded-md bg-slate-50 dark:bg-white/5 border border-slate-200 dark:border-white/10 text-slate-900 dark:text-white p-3 text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500 mb-3" />
-        <div className="flex justify-end gap-2">
-          <Button variant="ghost" onClick={onClose} disabled={sending} className="text-slate-600 dark:text-slate-500">Cancel</Button>
-          <Button onClick={send} disabled={sending} className="bg-emerald-600 hover:bg-emerald-500 text-white gap-1.5">{sending ? <Loader2 className="w-4 h-4 animate-spin" /> : <Send className="w-4 h-4" />} Send</Button>
+        
+        <div className="relative mb-5">
+          <textarea 
+            value={msg} 
+            onChange={e => setMsg(e.target.value)} 
+            rows={5} 
+            className="w-full rounded-2xl bg-white/50 dark:bg-black/20 border border-slate-200 dark:border-white/5 text-slate-900 dark:text-white p-4 text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500/50 focus:border-emerald-500/50 transition-all resize-none shadow-inner" 
+            placeholder="Type your message here..."
+          />
+          <div className="absolute bottom-3 right-3 text-[10px] text-slate-400 font-medium">
+            {msg.length} chars
+          </div>
+        </div>
+        
+        <div className="flex justify-end gap-3">
+          <Button variant="ghost" onClick={onClose} disabled={sending} className="text-slate-600 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-white/5 rounded-xl">
+            Cancel
+          </Button>
+          <Button onClick={send} disabled={sending} className="bg-emerald-500 hover:bg-emerald-400 text-white gap-2 rounded-xl px-6 shadow-lg shadow-emerald-500/20 transition-all active:scale-95">
+            {sending ? <Loader2 className="w-4 h-4 animate-spin" /> : <Send className="w-4 h-4" />} 
+            {sending ? 'Sending...' : 'Send Message'}
+          </Button>
         </div>
       </div>
     </div>
@@ -53,6 +87,17 @@ const OUTCOME_STYLE: Record<string, string> = {
   Voicemail: 'text-blue-700 dark:text-blue-300 bg-blue-100 dark:bg-blue-500/10',
   Completed: 'text-emerald-700 dark:text-emerald-300 bg-emerald-100 dark:bg-emerald-500/10',
 };
+
+function AudioWaveform({ playing }: { playing: boolean }) {
+  if (!playing) return <div className="flex items-center gap-0.5 h-3"><div className="w-0.5 h-1 bg-emerald-500/50 rounded-full"/><div className="w-0.5 h-1 bg-emerald-500/50 rounded-full"/><div className="w-0.5 h-1 bg-emerald-500/50 rounded-full"/></div>;
+  return (
+    <div className="flex items-center gap-0.5 h-3">
+      {[1, 2, 3, 4, 5].map((i) => (
+        <div key={i} className="waveform-bar w-0.5 h-3 bg-emerald-500 rounded-full" />
+      ))}
+    </div>
+  );
+}
 
 function fmtDuration(s: number) {
   if (!s) return '0:00';
@@ -118,14 +163,14 @@ export default function CallsPage() {
     <div className="min-h-screen pb-10">
       <Header title="Call Logs & Lead Sheet" subtitle="Auto-generated sheet of every call, outcome, and interested lead" />
       <div className="p-4 sm:p-6 space-y-4">
-        <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
+        <MotionList className="grid grid-cols-2 sm:grid-cols-4 gap-4">
           {[
             { label: 'Total Calls', value: calls.length, color: 'text-slate-900 dark:text-white' },
             { label: 'Interested Leads', value: interestedCount, color: 'text-emerald-600 dark:text-emerald-400' },
             { label: 'WhatsApp Sent', value: calls.filter(c => c.whatsappSent).length, color: 'text-cyan-500' },
             { label: 'Conversion', value: calls.length ? `${Math.round((interestedCount / calls.length) * 100)}%` : '0%', color: 'text-amber-600 dark:text-amber-400' },
-          ].map(s => <div key={s.label} className="bg-white dark:bg-[#0a1128] border border-slate-200 dark:border-white/5 rounded-xl p-4"><div className={cn('text-2xl font-bold', s.color)}>{s.value}</div><div className="text-xs text-slate-600 dark:text-slate-500">{s.label}</div></div>)}
-        </div>
+          ].map(s => <MotionItem key={s.label} className="glass-card rounded-xl p-4 transition-transform hover:-translate-y-1"><div className={cn('text-2xl font-bold', s.color)}>{s.value}</div><div className="text-xs text-slate-600 dark:text-slate-500">{s.label}</div></MotionItem>)}
+        </MotionList>
 
         <div className="flex flex-col sm:flex-row gap-3 sm:items-center">
           <div className="relative flex-1 max-w-xs">
@@ -140,56 +185,84 @@ export default function CallsPage() {
           <Button onClick={exportCsv} variant="outline" className="border-slate-200 dark:border-white/10 text-slate-700 dark:text-slate-200 gap-2"><Download className="w-4 h-4" /> Export Sheet (CSV)</Button>
         </div>
 
-        <div className="bg-white dark:bg-[#0a1128] border border-slate-200 dark:border-white/5 rounded-2xl overflow-x-auto">
-          <table className="w-full min-w-[760px] text-sm">
-            <thead className="bg-slate-50 dark:bg-white/[0.02] border-b border-slate-200 dark:border-white/5">
-              <tr>
-                {['Customer', 'Phone', 'Agent', 'Duration', 'Outcome', 'Cost', 'Time', ''].map(h => (
-                  <th key={h} className="px-5 py-4 text-left text-xs font-medium text-slate-600 dark:text-slate-500 uppercase tracking-wider">{h}</th>
-                ))}
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-slate-200 dark:divide-white/5">
-              {loading ? (
-                <tr><td colSpan={8} className="px-5 py-10 text-center text-slate-600 dark:text-slate-500">Loading...</td></tr>
-              ) : filtered.length === 0 ? (
-                <tr><td colSpan={8} className="px-5 py-12 text-center"><Phone className="w-8 h-8 text-slate-500 dark:text-slate-600 mx-auto mb-2" /><div className="text-slate-600 dark:text-slate-500 text-sm">No calls found</div></td></tr>
-              ) : filtered.map(c => (
-                <tr key={c.id} className={cn('hover:bg-slate-50 dark:hover:bg-white/[0.02] transition-colors', c.interested && 'bg-emerald-500/[0.03]')}>
-                  <td className="px-5 py-4 text-slate-900 dark:text-white">{c.customerName || <span className="text-slate-500 dark:text-slate-400">—</span>}</td>
-                  <td className="px-5 py-4 font-mono text-slate-600 dark:text-slate-300">{c.phone}</td>
-                  <td className="px-5 py-4 text-slate-600 dark:text-slate-400">{c.agent?.name || '—'}</td>
-                  <td className="px-5 py-4"><span className="flex items-center gap-1.5 text-slate-600 dark:text-slate-300"><Clock className="w-3.5 h-3.5 text-slate-500 dark:text-slate-400" />{fmtDuration(c.duration)}</span></td>
-                  <td className="px-5 py-4">
-                    <div className="flex items-center gap-1.5">
-                      {c.outcome ? <span className={cn('px-2 py-1 rounded-full text-xs font-medium', OUTCOME_STYLE[c.outcome] || 'text-slate-500 dark:text-slate-400 bg-slate-100 dark:bg-white/5')}>{c.outcome}</span> : <span className="text-slate-600 dark:text-slate-500">—</span>}
-                      {c.whatsappSent && <span title="WhatsApp follow-up sent" className="text-emerald-500"><MessageCircle className="w-3.5 h-3.5" /></span>}
-                    </div>
-                  </td>
-                  <td className="px-5 py-4 text-slate-600 dark:text-slate-400">₹{(c.cost || 0).toFixed(2)}</td>
-                  <td className="px-5 py-4 text-slate-600 dark:text-slate-500 text-xs">{new Date(c.startedAt).toLocaleString('en-IN', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' })}</td>
-                  <td className="px-5 py-4 text-right">
-                    <div className="flex items-center justify-end gap-3">
-                      {c.interested ? (
-                        <span className="inline-flex items-center gap-1 text-xs text-emerald-600 dark:text-emerald-400"><Check className="w-3.5 h-3.5" />Lead</span>
-                      ) : (
-                        <button onClick={() => markInterested(c.id)} disabled={marking === c.id} className="inline-flex items-center gap-1 text-xs text-slate-600 dark:text-slate-500 hover:text-emerald-600 dark:hover:text-emerald-400 disabled:opacity-50">
-                          <Sparkles className="w-3.5 h-3.5" />{marking === c.id ? '…' : 'Mark interested'}
-                        </button>
-                      )}
-                      <button onClick={() => setWaTarget(c)} title="Send WhatsApp" className="inline-flex items-center gap-1 text-xs text-slate-600 dark:text-slate-500 hover:text-emerald-600 dark:hover:text-emerald-400">
-                        <MessageCircle className="w-3.5 h-3.5" />WhatsApp
-                      </button>
-                      <a href={`/dashboard/calls/${c.id}`} className="text-sm font-medium text-emerald-600 dark:text-emerald-400 hover:underline">
-                        Details
-                      </a>
-                    </div>
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
+        <MotionList className="flex flex-col gap-3 mt-6">
+          {loading ? (
+            <div className="py-10 text-center text-slate-600 dark:text-slate-500 flex flex-col items-center justify-center">
+              <Loader2 className="w-8 h-8 animate-spin mb-4 text-emerald-500/50" />
+              Loading calls...
+            </div>
+          ) : filtered.length === 0 ? (
+            <div className="py-16 text-center glass-card rounded-2xl">
+              <div className="w-16 h-16 rounded-full bg-slate-100 dark:bg-white/5 flex items-center justify-center mx-auto mb-4">
+                <Phone className="w-8 h-8 text-slate-400 dark:text-slate-600" />
+              </div>
+              <div className="text-slate-900 dark:text-white font-medium mb-1">No calls found</div>
+              <div className="text-slate-500 dark:text-slate-400 text-sm">Try adjusting your search or filters.</div>
+            </div>
+          ) : filtered.map(c => (
+            <MotionItem key={c.id} className={cn(
+              "group flex flex-col sm:flex-row sm:items-center justify-between p-4 sm:p-5 rounded-2xl glass-card border border-slate-200/50 dark:border-white/5 hover:border-emerald-500/30 transition-all duration-300 gap-4",
+              c.interested && 'bg-emerald-50/50 dark:bg-emerald-500/[0.03] border-emerald-100 dark:border-emerald-500/10'
+            )}>
+              <div className="flex items-center gap-4 min-w-0">
+                <div className="w-10 h-10 rounded-full bg-slate-100 dark:bg-slate-800 flex items-center justify-center shrink-0 border border-slate-200 dark:border-slate-700">
+                  <Phone className="w-4 h-4 text-slate-500 dark:text-slate-400" />
+                </div>
+                <div className="min-w-0">
+                  <div className="flex items-center gap-2 mb-1">
+                    <span className="font-semibold text-slate-900 dark:text-white truncate">
+                      {c.customerName || <span className="text-slate-400 dark:text-slate-500 font-normal">Unknown Name</span>}
+                    </span>
+                    {c.outcome && (
+                      <span className={cn('px-2 py-0.5 rounded-full text-[10px] font-medium uppercase tracking-wider', OUTCOME_STYLE[c.outcome] || 'text-slate-500 bg-slate-100 dark:bg-white/5')}>
+                        {c.outcome}
+                      </span>
+                    )}
+                  </div>
+                  <div className="flex items-center gap-3 text-xs text-slate-500 dark:text-slate-400">
+                    <span className="font-mono bg-slate-100 dark:bg-slate-800/50 px-1.5 py-0.5 rounded text-slate-600 dark:text-slate-300">{c.phone}</span>
+                    <span className="hidden sm:inline">•</span>
+                    <span className="flex items-center gap-1"><Clock className="w-3 h-3" /> {fmtDuration(c.duration)}</span>
+                    <span className="hidden sm:inline">•</span>
+                    <span>{new Date(c.startedAt).toLocaleString('en-IN', { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })}</span>
+                  </div>
+                </div>
+              </div>
+
+              <div className="flex items-center gap-3 sm:ml-auto shrink-0 overflow-x-auto pb-1 sm:pb-0">
+                {c.interested ? (
+                  <div className="flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-emerald-100 dark:bg-emerald-500/10 text-emerald-700 dark:text-emerald-400 text-xs font-medium">
+                    <Check className="w-3.5 h-3.5" /> High Intent Lead
+                  </div>
+                ) : (
+                  <Button variant="ghost" size="sm" onClick={() => markInterested(c.id)} disabled={marking === c.id} className="h-8 text-xs text-slate-500 hover:text-emerald-600 hover:bg-emerald-50 dark:hover:bg-emerald-500/10">
+                    <Sparkles className="w-3.5 h-3.5 mr-1.5" /> {marking === c.id ? '...' : 'Mark Lead'}
+                  </Button>
+                )}
+
+                <div className="w-px h-6 bg-slate-200 dark:bg-white/10 hidden sm:block" />
+
+                <div className="flex items-center gap-2">
+                  <Button variant="outline" size="sm" onClick={() => setWaTarget(c)} className={cn("h-8 gap-1.5 text-xs transition-colors", c.whatsappSent ? "text-emerald-600 border-emerald-200 bg-emerald-50 dark:border-emerald-500/20 dark:bg-emerald-500/10" : "text-slate-600 dark:text-slate-300")}>
+                    <MessageCircle className="w-3.5 h-3.5" /> 
+                    <span className="hidden sm:inline">{c.whatsappSent ? 'Sent' : 'WhatsApp'}</span>
+                  </Button>
+                  
+                  <div className="flex items-center gap-2 bg-slate-100 dark:bg-[#0f172a] h-8 px-2.5 rounded-md border border-slate-200 dark:border-white/10 group cursor-pointer hover:border-emerald-500/50 transition-colors shrink-0">
+                    <AudioWaveform playing={false} />
+                    <span className="text-[10px] text-slate-500 uppercase tracking-wide group-hover:text-emerald-500 transition-colors font-medium">Listen</span>
+                  </div>
+
+                  <a href={`/dashboard/calls/${c.id}`}>
+                    <Button variant="ghost" size="sm" className="h-8 text-xs text-indigo-600 dark:text-indigo-400 hover:bg-indigo-50 dark:hover:bg-indigo-500/10">
+                      Details
+                    </Button>
+                  </a>
+                </div>
+              </div>
+            </MotionItem>
+          ))}
+        </MotionList>
       </div>
 
       {waTarget && <WhatsAppModal target={waTarget} template={user?.whatsappTemplate || ''} company={user?.company || user?.fullName || ''} onClose={() => setWaTarget(null)} onSent={load} />}

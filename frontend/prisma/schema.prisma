@@ -48,6 +48,12 @@ model Agent {
   organizationId    String
   name              String
   description       String?
+  // Voice orchestration provider: vapi | omnidimension | mock
+  provider          String             @default("vapi")
+  // Provider-side agent id (Vapi assistant UUID, OmniDimension integer id, ...)
+  externalAgentId   String?
+  sttProvider       String?
+  sttModel          String?
   llmProvider       String             @default("openai")
   model             String             @default("gpt-4o")
   temperature       Float              @default(0.7)
@@ -127,13 +133,24 @@ model Campaign {
   organizationId String
   agentId        String
   name           String
+  // draft | scheduled | running | paused | completed
   status         String       @default("draft")
+  // JSON: { tz, days:[0-6], start:"09:00", end:"18:00" }
   businessHours  String?
+  // Max calls per calendar day (null = unlimited)
   callLimits     Int?
   scheduledAt    DateTime?
+  // Max simultaneous in-flight calls
+  concurrency    Int          @default(1)
+  // Retry policy for unanswered / failed contacts
+  retryLimit     Int          @default(0)
+  retryDelayMins Int          @default(60)
   totalContacts  Int          @default(0)
   completedCalls Int          @default(0)
   failedCalls    Int          @default(0)
+  startedAt      DateTime?
+  completedAt    DateTime?
+  lastTickAt     DateTime?
   createdAt      DateTime     @default(now())
   updatedAt      DateTime     @updatedAt
   callLogs       CallLog[]
@@ -152,7 +169,12 @@ model Contact {
   company        String?
   loanAmount     Float?
   loanType       String?
+  // pending | calling | completed | failed | exhausted
   status         String               @default("pending")
+  // Retry bookkeeping for the campaign runner
+  attempts       Int                  @default(0)
+  lastAttemptAt  DateTime?
+  nextAttemptAt  DateTime?
   customFields   String?
   notes          String?
   tags           String?

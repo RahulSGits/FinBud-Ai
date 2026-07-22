@@ -173,6 +173,24 @@
 }
 @media (prefers-reduced-motion: reduce) {
   .finbud-grid-floor { animation: none; }
+  /* Smooth scrolling is itself a vestibular trigger — jump instead. */
+  html { scroll-behavior: auto; }
+  /* Backstop for any CSS transition/animation not covered above.
+     JS-driven motion is handled separately by MotionConfig reducedMotion="user". */
+  *, *::before, *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+}
+
+/* Keyboard focus must stay visible everywhere. Scoped to :focus-visible so it
+   only appears for keyboard users, never on mouse click. */
+:focus-visible {
+  outline: 2px solid hsl(var(--ring));
+  outline-offset: 2px;
+  border-radius: 4px;
 }
 
 /* Light-mode polish: subtle depth + warmth so white cards don't read flat.

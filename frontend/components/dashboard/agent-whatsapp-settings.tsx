@@ -92,8 +92,8 @@ export default function AgentWhatsAppSettings({ agentId }: { agentId: string }) 
               onChange={e => setNewTemplate({...newTemplate, triggerOutcome: e.target.value})}
               className="w-full px-4 py-2 bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-lg text-sm"
             >
-              <option value="interested">Call completed and marked "Interested"</option>
-              <option value="not_interested">Call completed and marked "Not Interested"</option>
+              <option value="interested">Call completed and marked &quot;Interested&quot;</option>
+              <option value="not_interested">Call completed and marked &quot;Not Interested&quot;</option>
               <option value="no-answer">Call failed (No Answer)</option>
               <option value="all">Any Call Completed</option>
             </select>
@@ -148,7 +148,7 @@ export default function AgentWhatsAppSettings({ agentId }: { agentId: string }) 
                   </span>
                 )}
               </div>
-              <p className="text-sm text-slate-600 dark:text-slate-300 mt-2 line-clamp-2">"{t.messageBody}"</p>
+              <p className="text-sm text-slate-600 dark:text-slate-300 mt-2 line-clamp-2">&quot;{t.messageBody}&quot;</p>
             </div>
             <button 
               onClick={() => handleDelete(t.id)}

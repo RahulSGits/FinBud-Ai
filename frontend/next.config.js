@@ -6,8 +6,9 @@ const nextConfig = {
   images: { unoptimized: true },
   poweredByHeader: false,
   experimental: {
-    serverComponentsExternalPackages: ['better-sqlite3', '@prisma/adapter-better-sqlite3', '@prisma/client'],
+    serverComponentsExternalPackages: ['better-sqlite3', '@prisma/adapter-better-sqlite3', '@prisma/client', 'ws', 'bufferutil', 'utf-8-validate'],
   },
+  transpilePackages: ['@splinetool/react-spline', '@splinetool/runtime'],
   async headers() {
     return [
       {

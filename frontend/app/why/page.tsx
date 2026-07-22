@@ -3,7 +3,7 @@
 import { Navbar } from '@/components/marketing/navbar';
 import { Footer } from '@/components/marketing/footer';
 import { Zap, Globe2, ShieldCheck, MessageSquare, BookOpen, BarChart3, Database, Cpu, Network, AudioWaveform } from 'lucide-react';
-import { motion } from 'framer-motion';
+import { motion } from 'motion/react';
 
 export default function WhyPage() {
   return (

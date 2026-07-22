@@ -2,7 +2,7 @@ import { getAuthUser } from '@/lib/auth-server';
 import { redirect } from 'next/navigation';
 import { db } from '@/lib/db';
 import { PhoneCall } from 'lucide-react';
-import { MotionWrapper, MotionList, MotionItem } from '@/components/admin/motion-wrapper';
+import { MotionWrapper, MotionList, MotionItem } from '@/components/motion-wrapper';
 import { CallMonitorChart } from '@/components/admin/call-monitor-charts';
 
 export const dynamic = 'force-dynamic';
@@ -85,53 +85,57 @@ export default async function AdminCallsPage() {
       <MotionWrapper delay={0.3}>
         <div className="bg-white dark:bg-[#0f172a] rounded-2xl shadow-sm border border-slate-200 dark:border-white/5 p-6 overflow-hidden">
           <h3 className="text-lg font-semibold text-slate-900 dark:text-white mb-4">Recent Call Records</h3>
-          <div className="overflow-x-auto">
-            <table className="w-full text-left border-collapse">
-              <thead>
-                <tr className="border-b border-slate-100 dark:border-white/5 text-slate-500 dark:text-slate-400 text-xs font-semibold uppercase">
-                  <th className="py-3 px-4">Organization</th>
-                  <th className="py-3 px-4">Phone Number</th>
-                  <th className="py-3 px-4">Direction</th>
-                  <th className="py-3 px-4">Status</th>
-                  <th className="py-3 px-4">Duration</th>
-                  <th className="py-3 px-4">Cost</th>
-                  <th className="py-3 px-4">Started At</th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-slate-100 dark:divide-white/5 text-slate-700 dark:text-slate-300 text-sm">
-                {calls.map((call) => (
-                  <tr key={call.id} className="hover:bg-slate-50 dark:hover:bg-slate-800/50">
-                    <td className="py-3 px-4 font-medium text-slate-900 dark:text-white">
-                      {call.organization?.name || 'Unknown'}
-                    </td>
-                    <td className="py-3 px-4 font-mono">{call.phone}</td>
-                    <td className="py-3 px-4 capitalize">{call.direction}</td>
-                    <td className="py-3 px-4">
-                      <span className={`inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full text-xs font-medium ${
+          <MotionList className="flex flex-col gap-3">
+            {calls.length === 0 ? (
+              <div className="py-12 text-center">
+                <PhoneCall className="w-8 h-8 text-slate-400 mx-auto mb-2" />
+                <div className="text-slate-500">No calls logged yet.</div>
+              </div>
+            ) : (
+              calls.map((call) => (
+                <MotionItem key={call.id} className="flex flex-col sm:flex-row sm:items-center justify-between p-4 rounded-xl bg-slate-50 dark:bg-slate-800/20 border border-slate-100 dark:border-white/5 hover:border-indigo-500/30 transition-all gap-4">
+                  <div className="flex flex-col gap-1">
+                    <div className="flex items-center gap-2">
+                      <span className="font-semibold text-slate-900 dark:text-white">
+                        {call.organization?.name || 'Unknown Org'}
+                      </span>
+                      <span className="inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-bold tracking-wide uppercase bg-slate-200 text-slate-700 dark:bg-slate-700 dark:text-slate-300">
+                        {call.direction}
+                      </span>
+                      <span className={`inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full text-[10px] font-bold uppercase tracking-wide ${
                         call.status === 'completed' 
                           ? 'bg-emerald-100 text-emerald-800 dark:bg-emerald-500/10 dark:text-emerald-400' 
                           : 'bg-yellow-100 text-yellow-800 dark:bg-yellow-500/10 dark:text-yellow-400'
                       }`}>
                         {call.status}
                       </span>
-                    </td>
-                    <td className="py-3 px-4">{call.duration}s</td>
-                    <td className="py-3 px-4">${call.cost.toFixed(2)}</td>
-                    <td className="py-3 px-4 text-xs text-slate-500">
-                      {call.startedAt.toLocaleString()}
-                    </td>
-                  </tr>
-                ))}
-                {calls.length === 0 && (
-                  <tr>
-                    <td colSpan={7} className="py-8 text-center text-slate-500">
-                      No calls logged yet.
-                    </td>
-                  </tr>
-                )}
-              </tbody>
-            </table>
-          </div>
+                    </div>
+                    <div className="flex items-center gap-3 text-xs text-slate-500">
+                      <span className="font-mono bg-slate-200 dark:bg-slate-900/50 px-1.5 py-0.5 rounded">
+                        {call.phone}
+                      </span>
+                      <span>•</span>
+                      <span>{call.duration}s</span>
+                      <span>•</span>
+                      <span className="font-medium text-emerald-600 dark:text-emerald-400">
+                        ${call.cost.toFixed(2)}
+                      </span>
+                    </div>
+                  </div>
+                  <div className="flex flex-col items-start sm:items-end gap-1">
+                    <span className="text-xs text-slate-500">
+                      {call.startedAt.toLocaleString('en-US', {
+                        month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit'
+                      })}
+                    </span>
+                    <a href={`/admin/calls/${call.id}`} className="text-xs font-medium text-indigo-600 dark:text-indigo-400 hover:underline">
+                      View Details &rarr;
+                    </a>
+                  </div>
+                </MotionItem>
+              ))
+            )}
+          </MotionList>
         </div>
       </MotionWrapper>
     </div>
