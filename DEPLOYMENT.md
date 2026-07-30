@@ -122,12 +122,24 @@ secret behind that prefix.
 
 ## 4. Cron
 
-`web/vercel.json` already registers `/api/campaigns/tick` every 5 minutes.
-Vercel Cron sends a `GET` with `Authorization: Bearer $CRON_SECRET`, which the
-route accepts alongside the `x-cron-secret` header other schedulers use.
+Campaign pacing comes from two schedulers, because Vercel's Hobby plan rejects
+any cron more frequent than daily:
 
-Set `CRON_SECRET` or the cron will be rejected. Vercel's Hobby plan allows only
-daily crons — campaigns will crawl unless you are on Pro.
+- **GitHub Actions** (`.github/workflows/campaign-tick.yml`) ticks every ~5
+  minutes and does the real work. Configure two repository secrets under
+  **Settings → Secrets and variables → Actions**: `APP_URL`
+  (e.g. `https://finbud-call-ai.vercel.app`) and `CRON_SECRET` (the same value
+  as the Vercel env var).
+- **Vercel Cron** fires once daily at 09:00 IST as a safety net, via the
+  `crons` entry in `vercel.json`. Vercel sends `GET` with
+  `Authorization: Bearer $CRON_SECRET`; the route accepts that alongside the
+  `x-cron-secret` header other schedulers use. On the Pro plan you can tighten
+  its schedule back to `*/5 * * * *` and retire the workflow.
+
+Set `CRON_SECRET` in both places or ticks are rejected with 401 — the workflow
+fails loudly in the Actions tab when the two values disagree. The dashboard
+also ticks while anyone has it open, so a missing scheduler slows campaigns
+rather than breaking them.
 
 ---
 

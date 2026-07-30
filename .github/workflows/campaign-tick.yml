@@ -1,0 +1,45 @@
+# Advances running campaigns every ~5 minutes.
+#
+# Vercel's Hobby plan only allows daily crons, which is far too slow for a
+# dialling queue — a campaign would place one batch of calls per day. GitHub's
+# scheduler is free and runs every 5 minutes (best-effort; expect occasional
+# multi-minute drift), so it does the pacing and the Vercel daily cron stays on
+# only as a safety net that fires as the Indian calling window opens.
+#
+# Setup (repo Settings → Secrets and variables → Actions):
+#   secret  CRON_SECRET  — same value as the Vercel env var of that name
+#   secret  APP_URL      — e.g. https://finbud-call-ai.vercel.app
+#
+# The tick endpoint is restart-safe and idempotent: overlapping or missed runs
+# cannot double-dial a contact (contacts are claimed with a conditional update).
+name: Campaign tick
+
+on:
+  schedule:
+    - cron: '*/5 * * * *'
+  workflow_dispatch: {}
+
+permissions: {}
+
+jobs:
+  tick:
+    runs-on: ubuntu-latest
+    timeout-minutes: 6
+    steps:
+      - name: Tick campaigns
+        env:
+          APP_URL: ${{ secrets.APP_URL }}
+          CRON_SECRET: ${{ secrets.CRON_SECRET }}
+        run: |
+          if [ -z "$APP_URL" ] || [ -z "$CRON_SECRET" ]; then
+            echo "APP_URL / CRON_SECRET secrets not configured; skipping."
+            exit 0
+          fi
+          code=$(curl -sS -o /tmp/tick.json -w '%{http_code}' --max-time 280 \
+            -X POST "$APP_URL/api/campaigns/tick" \
+            -H "x-cron-secret: $CRON_SECRET")
+          cat /tmp/tick.json
+          echo
+          # 401 means the secrets here and on Vercel disagree — fail loudly so
+          # it shows up in the Actions tab instead of campaigns silently stalling.
+          [ "$code" = "200" ] || { echo "tick failed with HTTP $code"; exit 1; }

@@ -52,7 +52,7 @@ export default function LoginPage() {
             <FinanceBuddhaLogo size="md" />
           </Link>
           <h2 className="text-4xl font-bold text-slate-900 dark:text-white leading-tight mb-4">AI Voice Operations<br/><span className="text-brand-600 dark:text-brand-400">Platform.</span></h2>
-          <p className="text-slate-500 dark:text-slate-400 text-sm leading-relaxed mb-10">Finance Buddha's internal platform for AI-powered outbound calling — agents, campaigns, live monitoring and lead outcomes in one place.</p>
+          <p className="text-slate-500 dark:text-slate-400 text-sm leading-relaxed mb-10">Finance Buddha&apos;s internal platform for AI-powered outbound calling — agents, campaigns, live monitoring and lead outcomes in one place.</p>
           <div className="space-y-4">
             {[
               { label: 'Bulk AI calling campaigns', icon: '📞' },
