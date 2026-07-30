@@ -1,0 +1,529 @@
+// FinBud AI — single-company AI voice calling platform.
+//
+// Deliberately single-tenant: there is no Organization table and no
+// organizationId on any row. Every record belongs to the one company running
+// this deployment, which removes a join and a filter from every query.
+//
+// Two roles only: admin and employee. See User.role.
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider  = "postgresql"
+  url       = env("DATABASE_URL")
+  directUrl = env("DIRECT_URL")
+}
+
+// ---------------------------------------------------------------------------
+// People & access
+// ---------------------------------------------------------------------------
+
+enum Role {
+  admin
+  employee
+}
+
+enum UserStatus {
+  invited // created by an admin, has not set a password yet
+  active
+  disabled
+}
+
+model User {
+  id    String @id @default(uuid())
+  email String @unique
+  name  String
+
+  /// Company employee number. Optional, but unique when set — staff sign in
+  /// with either this or their email address.
+  employeeId String?    @unique
+  role       Role       @default(employee)
+  status     UserStatus @default(invited)
+
+  // Basic contact/profile fields (a fuller HR profile is future work).
+  phone       String?
+  department  String?
+  designation String?
+
+  // Null until the user completes the invite / sets a password.
+  passwordHash String?
+
+  // True while the account still has the admin-assigned default password.
+  // The user is forced to /change-password and blocked from every dashboard
+  // page until they choose their own.
+  mustChangePassword Boolean @default(false)
+
+  // Guardrail: employees can trigger calls, which costs money.
+  // Null means "use the global default" from Setting.
+  dailyCallLimit Int?
+
+  lastLoginAt DateTime?
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+
+  invitesSent      Invite[]   @relation("InvitedBy")
+  assignedContacts Contact[]  @relation("AssignedTo")
+  callsStarted     Call[]     @relation("StartedBy")
+  campaigns        Campaign[] @relation("CampaignCreatedBy")
+  agents           Agent[]    @relation("AgentCreatedBy")
+  documents        Document[] @relation("UploadedBy")
+  notes            Note[]
+  auditLogs        AuditLog[]
+  templates        MessageTemplate[] @relation("TemplateCreatedBy")
+  messagesSent     Message[]         @relation("MessageSentBy")
+
+  @@index([role, status])
+}
+
+/// A pending invitation. The raw token is emailed via Resend and never stored —
+/// only its hash, so a database leak cannot be used to claim accounts.
+model Invite {
+  id        String   @id @default(uuid())
+  email     String
+  role      Role     @default(employee)
+  tokenHash String   @unique
+  expiresAt DateTime
+
+  acceptedAt  DateTime?
+  invitedById String?
+  invitedBy   User?     @relation("InvitedBy", fields: [invitedById], references: [id], onDelete: SetNull)
+
+  createdAt DateTime @default(now())
+
+  @@index([email])
+  @@index([expiresAt])
+}
+
+// ---------------------------------------------------------------------------
+// Agents
+// ---------------------------------------------------------------------------
+
+model Agent {
+  id          String  @id @default(uuid())
+  name        String
+  description String?
+  isActive    Boolean @default(false)
+
+  // Spoken first on outbound calls. Supports {{customer_name}}.
+  firstMessage String?
+
+  /// Whether the opener is personalised per contact, and whether the customer
+  /// can talk over it. Both are behaviour of the greeting itself, so they live
+  /// beside it rather than in the flow.
+  firstMessageDynamic       Boolean @default(true)
+  firstMessageInterruptible Boolean @default(false)
+
+  /// The conversational flow: an ordered array of
+  /// `{ id, title, body, enabled }`, authored freely in the builder.
+  ///
+  /// Replaces the fixed eight-field prompt below. Sections are user-defined —
+  /// they can be renamed, reordered, switched off without deleting, and added
+  /// to — because no fixed set survives contact with a real script. The legacy
+  /// columns are retained so existing agents keep working and can be migrated
+  /// lazily; lib/providers/index.ts reads flowSections first and falls back.
+  flowSections Json?
+
+  // Legacy fixed prompt fields. Superseded by flowSections; still read when an
+  // agent predates it.
+  systemPrompt       String?
+  businessContext    String?
+  callObjective      String?
+  qualificationRules String?
+  objectionHandling  String?
+  complianceRules    String?
+  closingScript      String?
+
+  /// Which voice engine executes this agent's calls: livekit | omnidimension | mock.
+  /// The app never depends on a specific one — see lib/providers.
+  voiceProvider String @default("livekit")
+
+  /// The provider's own id for this agent, stored after we sync it out.
+  /// Null until the first successful sync.
+  externalAgentId String?
+
+  /// Last successful sync to the provider, and the last error if it failed.
+  syncedAt   DateTime?
+  syncError  String?
+
+  // Model identifiers, e.g. "openai/gpt-4o-mini".
+  llmModel String  @default("openai/gpt-4o-mini")
+  sttModel String  @default("deepgram/nova-3")
+  ttsModel String  @default("cartesia/sonic-3")
+  voiceId  String?
+  language String  @default("multi")
+
+  transferEnabled Boolean @default(false)
+  transferNumber  String?
+
+  /// When true the worker retrieves knowledge-base context during calls.
+  useKnowledgeBase Boolean @default(false)
+
+  createdById String?
+  createdBy   User?   @relation("AgentCreatedBy", fields: [createdById], references: [id], onDelete: SetNull)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  campaigns Campaign[]
+  calls     Call[]
+
+  @@index([isActive])
+}
+
+// ---------------------------------------------------------------------------
+// Contacts
+// ---------------------------------------------------------------------------
+
+enum ContactStatus {
+  pending // never attempted
+  calling // a call is in flight
+  retry // failed/no answer, scheduled for another attempt
+  completed
+  exhausted // retry limit reached
+  do_not_call
+}
+
+model Contact {
+  id      String  @id @default(uuid())
+  name    String?
+  phone   String
+  email   String?
+  company String?
+
+  loanType   String?
+  loanAmount Float?
+
+  status       ContactStatus @default(pending)
+  tags         String[]      @default([])
+  /// Arbitrary extra columns preserved from an imported spreadsheet.
+  customFields Json?
+
+  assignedToId String?
+  assignedTo   User?   @relation("AssignedTo", fields: [assignedToId], references: [id], onDelete: SetNull)
+
+  campaignId String?
+  campaign   Campaign? @relation(fields: [campaignId], references: [id], onDelete: SetNull)
+
+  // Retry bookkeeping for the campaign runner.
+  attempts      Int       @default(0)
+  lastAttemptAt DateTime?
+  nextAttemptAt DateTime?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  calls    Call[]
+  notes    Note[]
+  messages Message[]
+
+  /// One row per phone number — re-importing a sheet updates rather than
+  /// duplicating, which is the most common data-quality problem here.
+  @@unique([phone])
+  @@index([status, nextAttemptAt])
+  @@index([assignedToId])
+  @@index([campaignId])
+}
+
+// ---------------------------------------------------------------------------
+// Campaigns
+// ---------------------------------------------------------------------------
+
+enum CampaignStatus {
+  draft
+  scheduled
+  running
+  paused
+  completed
+}
+
+model Campaign {
+  id     String         @id @default(uuid())
+  name   String
+  status CampaignStatus @default(draft)
+
+  agentId String
+  agent   Agent  @relation(fields: [agentId], references: [id], onDelete: Restrict)
+
+  createdById String?
+  createdBy   User?   @relation("CampaignCreatedBy", fields: [createdById], references: [id], onDelete: SetNull)
+
+  // Pacing controls.
+  concurrency    Int  @default(1)
+  dailyCallLimit Int?
+  retryLimit     Int  @default(1)
+  retryDelayMins Int  @default(60)
+
+  /// { tz, days:[0-6], start:"09:00", end:"18:00" }
+  businessHours Json?
+  scheduledAt   DateTime?
+
+  startedAt   DateTime?
+  completedAt DateTime?
+  lastTickAt  DateTime?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  contacts Contact[]
+  calls    Call[]
+
+  @@index([status])
+}
+
+// ---------------------------------------------------------------------------
+// Calls
+// ---------------------------------------------------------------------------
+
+enum CallStatus {
+  initiated
+  ringing
+  in_progress
+  completed
+  failed
+}
+
+enum LeadStatus {
+  interested
+  not_interested
+  callback_requested
+  no_answer
+  voicemail
+  unknown
+}
+
+model Call {
+  id        String @id @default(uuid())
+  phone     String
+  direction String @default("outbound")
+
+  status CallStatus @default(initiated)
+
+  /// LiveKit room name / SIP call id, used to correlate worker events.
+  providerCallId String? @unique
+
+  contactId String?
+  contact   Contact? @relation(fields: [contactId], references: [id], onDelete: SetNull)
+
+  campaignId String?
+  campaign   Campaign? @relation(fields: [campaignId], references: [id], onDelete: SetNull)
+
+  agentId String?
+  agent   Agent?  @relation(fields: [agentId], references: [id], onDelete: SetNull)
+
+  /// Who triggered it. Null for campaign-driven calls.
+  startedById String?
+  startedBy   User?   @relation("StartedBy", fields: [startedById], references: [id], onDelete: SetNull)
+
+  durationSec  Int     @default(0)
+  recordingUrl String?
+
+  /// Turn-by-turn transcript as [{role, text}].
+  transcript     Json?
+  transcriptText String?
+  summary        String?
+
+  interested     Boolean    @default(false)
+  leadStatus     LeadStatus @default(unknown)
+  leadScore      Int?
+  customerIntent String?
+  nextAction     String?
+  objections     String?
+
+  /// Populated when a dial fails, so the UI can show a real reason.
+  failureReason String?
+
+  startedAt DateTime  @default(now())
+  endedAt   DateTime?
+
+  notes    Note[]
+  messages Message[]
+
+  @@index([status])
+  @@index([startedAt])
+  @@index([leadStatus])
+  @@index([campaignId])
+}
+
+/// Employee follow-up: free-text notes and scheduled callbacks.
+model Note {
+  id   String @id @default(uuid())
+  body String
+
+  contactId String
+  contact   Contact @relation(fields: [contactId], references: [id], onDelete: Cascade)
+
+  callId String?
+  call   Call?   @relation(fields: [callId], references: [id], onDelete: SetNull)
+
+  authorId String?
+  author   User?   @relation(fields: [authorId], references: [id], onDelete: SetNull)
+
+  /// Set when this note schedules a callback.
+  callbackAt DateTime?
+
+  createdAt DateTime @default(now())
+
+  @@index([contactId])
+  @@index([callbackAt])
+}
+
+// ---------------------------------------------------------------------------
+// Knowledge base
+// ---------------------------------------------------------------------------
+
+enum DocumentStatus {
+  uploading
+  processing
+  ready
+  failed
+}
+
+model Document {
+  id          String         @id @default(uuid())
+  name        String
+  mimeType    String
+  sizeBytes   Int
+  /// Object-storage key, not a public URL.
+  storagePath String
+  status      DocumentStatus @default(uploading)
+  /// Populated when status is failed.
+  error       String?
+
+  uploadedById String?
+  uploadedBy   User?   @relation("UploadedBy", fields: [uploadedById], references: [id], onDelete: SetNull)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  chunks DocumentChunk[]
+
+  @@index([status])
+}
+
+model DocumentChunk {
+  id         String   @id @default(uuid())
+  documentId String
+  document   Document @relation(fields: [documentId], references: [id], onDelete: Cascade)
+
+  content String
+  /// Position in the source document, so retrieved chunks can be cited.
+  ordinal Int    @default(0)
+
+  /// text-embedding-3-small, 1536 dimensions, stored as a plain float array.
+  ///
+  /// Deliberately not pgvector. A single company's knowledge base is a few
+  /// thousand chunks at most, where an exact scan in application code is both
+  /// fast enough and simpler than an ANN index — and it keeps the schema
+  /// runnable on any Postgres, with no extension to install first.
+  embedding Float[]
+
+  createdAt DateTime @default(now())
+
+  @@index([documentId])
+}
+
+// ---------------------------------------------------------------------------
+// WhatsApp follow-up
+// ---------------------------------------------------------------------------
+
+enum MessageStatus {
+  queued
+  sent
+  delivered
+  read
+  failed
+}
+
+/// A reusable WhatsApp message body.
+///
+/// Bodies support {{placeholders}} — see lib/messaging/render.ts for the
+/// supported set. Templates are stored rather than hardcoded so staff can add
+/// and edit their own follow-ups without a deploy.
+model MessageTemplate {
+  id   String @id @default(uuid())
+  name String
+  body String
+
+  /// Offered by default after a call with this outcome. Null means the template
+  /// is general-purpose and appears for every outcome.
+  leadStatus LeadStatus?
+
+  isActive Boolean @default(true)
+
+  createdById String?
+  createdBy   User?   @relation("TemplateCreatedBy", fields: [createdById], references: [id], onDelete: SetNull)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  messages Message[]
+
+  @@index([leadStatus, isActive])
+}
+
+/// One WhatsApp message we attempted to deliver.
+///
+/// The rendered body is stored, not just the template id: templates get edited,
+/// and the record of what was actually sent to a customer must not change
+/// retroactively.
+model Message {
+  id   String @id @default(uuid())
+  to   String
+  body String
+
+  status MessageStatus @default(queued)
+  error  String?
+
+  /// The provider's own id, for correlating delivery webhooks.
+  providerMessageId String? @unique
+
+  templateId String?
+  template   MessageTemplate? @relation(fields: [templateId], references: [id], onDelete: SetNull)
+
+  contactId String?
+  contact   Contact? @relation(fields: [contactId], references: [id], onDelete: SetNull)
+
+  callId String?
+  call   Call?   @relation(fields: [callId], references: [id], onDelete: SetNull)
+
+  sentById String?
+  sentBy   User?   @relation("MessageSentBy", fields: [sentById], references: [id], onDelete: SetNull)
+
+  createdAt   DateTime  @default(now())
+  sentAt      DateTime?
+  deliveredAt DateTime?
+
+  @@index([contactId])
+  @@index([status])
+  @@index([createdAt])
+}
+
+// ---------------------------------------------------------------------------
+// Platform
+// ---------------------------------------------------------------------------
+
+/// Singleton key/value configuration (default call limits, business hours,
+/// company name). Avoids a migration for every new setting.
+model Setting {
+  key       String   @id
+  value     Json
+  updatedAt DateTime @updatedAt
+}
+
+model AuditLog {
+  id       String  @id @default(uuid())
+  action   String
+  entity   String
+  entityId String?
+  meta     Json?
+
+  userId String?
+  user   User?   @relation(fields: [userId], references: [id], onDelete: SetNull)
+
+  createdAt DateTime @default(now())
+
+  @@index([entity, entityId])
+  @@index([createdAt])
+}

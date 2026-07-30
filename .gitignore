@@ -1,0 +1,25 @@
+# Secrets
+.env
+.env.local
+.env.*
+!.env.example
+
+# Python
+.venv/
+__pycache__/
+*.pyc
+
+# Node
+node_modules/
+.next/
+
+# OS
+.DS_Store
+*.tsbuildinfo
+
+# Local-only: DB dumps and parked old code
+backups/
+_pending/
+
+# Local tooling, not product code
+.claude/skills/
