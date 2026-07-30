@@ -1,5 +1,5 @@
 import { NextResponse } from 'next/server';
-import { db } from '@/lib/db';
+import { db, dbUnreachableMessage } from '@/lib/db';
 
 // Health check for uptime monitors / load balancers.
 //
@@ -15,6 +15,12 @@ export async function GET() {
     await db.$queryRaw`SELECT 1`;
     return NextResponse.json({ status: 'ok', db: 'up', time: new Date().toISOString() });
   } catch {
-    return NextResponse.json({ status: 'degraded', db: 'down', time: new Date().toISOString() }, { status: 503 });
+    return NextResponse.json(
+      // The hint names the actual fix when DATABASE_URL points at localhost on
+      // a deployed host — the most common cause of a permanently "degraded"
+      // first deploy.
+      { status: 'degraded', db: 'down', hint: dbUnreachableMessage(), time: new Date().toISOString() },
+      { status: 503 }
+    );
   }
 }

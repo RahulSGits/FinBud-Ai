@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { UserStatus } from '@prisma/client';
-import { db } from '@/lib/db';
+import { db, dbUnreachableMessage, isDbUnreachable } from '@/lib/db';
 import { createSession, verifyPassword } from '@/lib/auth';
 
 export async function POST(req: NextRequest) {
@@ -63,6 +63,11 @@ export async function POST(req: NextRequest) {
     });
   } catch (e) {
     console.error('Login error:', e);
+    // A dead database is an operator problem, not a credentials problem — say
+    // which, or every misconfigured deploy reads as "wrong password".
+    if (isDbUnreachable(e)) {
+      return NextResponse.json({ error: dbUnreachableMessage() }, { status: 503 });
+    }
     return NextResponse.json({ error: 'Server error' }, { status: 500 });
   }
 }
