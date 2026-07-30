@@ -186,17 +186,34 @@ function buildTranscript(outcome: Outcome, greeting: string, name?: string | nul
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
 /**
- * Simulate a call. Returns immediately like the real dispatcher and drives the
- * lifecycle in the background.
+ * Serverless hosts freeze the instance once the response is sent, so a
+ * fire-and-forget simulation is not guaranteed to run — on Vercel a mock call
+ * could sit at "ringing" until the stale-call reaper failed it, which reads as
+ * a broken product on the very first demo. There the lifecycle runs inline
+ * (compressed, so a campaign tick dialling several contacts stays fast); on a
+ * long-lived local server it stays in the background at a watchable pace.
+ */
+const SERVERLESS = !!process.env.VERCEL;
+
+/**
+ * Simulate a call. Locally it returns immediately like the real dispatcher and
+ * drives the lifecycle in the background; on serverless it completes inline.
  */
 export async function mockDispatch(params: DispatchParams): Promise<DispatchResult> {
   const roomName = `mock-${params.callId}`;
+  if (SERVERLESS) {
+    await simulate(params).catch((e) => console.error('[mock call] failed', e));
+    // The Call row is already 'completed', but callers treat this as "the dial
+    // went out" — returning ringing keeps the two modes indistinguishable.
+    return { roomName, status: CallStatus.ringing };
+  }
   void simulate(params).catch((e) => console.error('[mock call] failed', e));
   return { roomName, status: CallStatus.ringing };
 }
 
 async function simulate(params: DispatchParams): Promise<void> {
   const outcome = pickOutcome(params.callId);
+  const pace = (ms: number) => (SERVERLESS ? sleep(Math.min(ms, 50)) : sleep(ms));
 
   const agent = await db.agent.findUnique({
     where: { id: params.agentId },
@@ -204,21 +221,21 @@ async function simulate(params: DispatchParams): Promise<void> {
   });
   const greeting = agent?.firstMessage || 'Hello, am I speaking with the account holder?';
 
-  await sleep(700);
+  await pace(700);
   await db.call.updateMany({
     where: { id: params.callId, status: CallStatus.initiated },
     data: { status: CallStatus.ringing },
   });
 
   if (outcome.answered) {
-    await sleep(900);
+    await pace(900);
     await db.call.updateMany({
       where: { id: params.callId },
       data: { status: CallStatus.in_progress },
     });
   }
 
-  await sleep(1200);
+  await pace(1200);
 
   const turns = buildTranscript(outcome, greeting, params.customerName);
   const durationSec = outcome.answered ? 40 + (hash(params.callId) % 170) : 0;

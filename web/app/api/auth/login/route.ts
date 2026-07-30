@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { UserStatus } from '@prisma/client';
 import { db, dbUnreachableMessage, isDbUnreachable } from '@/lib/db';
 import { createSession, verifyPassword } from '@/lib/auth';
+import { clearFailures, isThrottled, recordFailure, retryAfterMinutes } from '@/lib/rate-limit';
 
 export async function POST(req: NextRequest) {
   try {
@@ -14,6 +15,19 @@ export async function POST(req: NextRequest) {
       return NextResponse.json(
         { error: 'Email or employee ID and password are required' },
         { status: 400 }
+      );
+    }
+
+    // Throttle on the account being guessed, not the caller's address: the
+    // client IP header is spoofable and shared behind NATs, but the account
+    // name is exactly what a guessing attack has to keep constant.
+    const throttleKey = identifier.toLowerCase();
+    if (isThrottled(throttleKey)) {
+      return NextResponse.json(
+        {
+          error: `Too many failed sign-in attempts. Try again in ${retryAfterMinutes(throttleKey)} minute(s).`,
+        },
+        { status: 429 }
       );
     }
 
@@ -30,8 +44,11 @@ export async function POST(req: NextRequest) {
     const valid = await verifyPassword(password, user?.passwordHash ?? null);
 
     if (!user || !valid) {
+      recordFailure(throttleKey);
       return NextResponse.json({ error: 'Invalid credentials' }, { status: 401 });
     }
+
+    clearFailures(throttleKey);
 
     // Distinguish these two only after the password checked out, so the states
     // aren't observable to an attacker guessing addresses.
