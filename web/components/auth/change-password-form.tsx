@@ -78,7 +78,7 @@ export function ChangePasswordForm({
           <input
             type="password" autoComplete="current-password" autoFocus
             value={current} onChange={(e) => setCurrent(e.target.value)}
-            placeholder={forced ? 'finbud@123' : ''}
+            placeholder={forced ? 'Finbud@2026' : ''}
             className={input}
           />
         </Field>

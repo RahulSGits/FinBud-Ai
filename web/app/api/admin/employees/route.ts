@@ -28,7 +28,7 @@ export async function GET() {
  * Create an employee account directly.
  *
  * Matches the spec's onboarding flow: the admin adds a person, the account is
- * created active with the shared default password `finbud@123`, and the person
+ * created active with the shared default password `Finbud@2026`, and the person
  * is forced to change it on first login. No email round-trip required.
  */
 export async function POST(req: NextRequest) {

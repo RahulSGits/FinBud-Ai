@@ -6,9 +6,12 @@ const nextConfig = {
   images: { unoptimized: true },
   poweredByHeader: false,
   experimental: {
-    serverComponentsExternalPackages: ['better-sqlite3', '@prisma/adapter-better-sqlite3', '@prisma/client', 'ws', 'bufferutil', 'utf-8-validate'],
+    // Left for the bundler to require() at runtime instead of being traced into
+    // the server bundle. `unpdf` is here because it reads `import.meta`, which
+    // webpack cannot statically analyse — bundling it emits a "Critical
+    // dependency" warning on every build and risks breaking PDF extraction.
+    serverComponentsExternalPackages: ['@prisma/client', 'unpdf', 'ws', 'bufferutil', 'utf-8-validate'],
   },
-  transpilePackages: ['@splinetool/react-spline', '@splinetool/runtime'],
   async headers() {
     return [
       {

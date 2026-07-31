@@ -13,6 +13,30 @@ export function isDbUnreachable(e: unknown): boolean {
 }
 
 /**
+ * True when the query never ran because Prisma's own pool was saturated.
+ *
+ * Distinct from unreachable: the database is fine, the connection budget is
+ * not. Several pages fan out a dozen queries in one `Promise.all`, so a
+ * `connection_limit` of 1 or 2 makes them serialise and time out — the URL
+ * looks right, the database is up, and the page still 500s.
+ */
+export function isPoolExhausted(e: unknown): boolean {
+  const message = e instanceof Error ? e.message : '';
+  return (e as { code?: string } | null)?.code === 'P2024' || /connection pool/i.test(message);
+}
+
+/** What to do about a saturated pool, naming the setting that causes it. */
+export function poolExhaustedMessage(): string {
+  const limit = /[?&]connection_limit=(\d+)/.exec(process.env.DATABASE_URL ?? '')?.[1];
+  return (
+    'The database is reachable, but the connection pool was exhausted before the query could ' +
+    `run${limit ? ` (connection_limit=${limit})` : ''}. Several pages issue a dozen queries at ` +
+    'once, so raise connection_limit in DATABASE_URL — 10 with pool_timeout=20 is a good ' +
+    'starting point behind a transaction pooler.'
+  );
+}
+
+/**
  * Name the actual cause of an unreachable database.
  *
  * "Check DATABASE_URL" is useless when the URL looks perfectly correct, which

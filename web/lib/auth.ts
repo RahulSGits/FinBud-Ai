@@ -12,8 +12,19 @@ import { db } from './db';
 
 const COOKIE = 'finbud_session';
 
-/** Password assigned to every employee the admin creates. */
-export const DEFAULT_PASSWORD = 'finbud@123';
+/**
+ * Password every new account starts on.
+ *
+ * The account is created with `mustChangePassword: true`, so the holder is sent
+ * to /change-password and blocked from every dashboard page until they choose
+ * their own — which is then stored as a bcrypt hash and used for every later
+ * sign-in. This shared value only ever survives the first login.
+ *
+ * It satisfies validatePassword() on purpose: the change-password form applies
+ * the same policy, and a default that failed it would be rejected as the user's
+ * "current password" before they could get past it.
+ */
+export const DEFAULT_PASSWORD = 'Finbud@2026';
 const SESSION_DAYS = 7;
 
 function secret(): Uint8Array {
