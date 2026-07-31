@@ -108,9 +108,16 @@ async function main() {
     users.push(
       await prisma.user.upsert({
         where: { email: p.email },
+        // passwordHash is reset on update as well as create. Without it, a
+        // re-seed over an existing database leaves the demo accounts on
+        // whatever password they already had — which nobody knows — and the
+        // script silently fails the one thing it promises: credentials you can
+        // sign in with. Safe only because this is the demo seeder; the
+        // production path is scripts/bootstrap-admin.mjs, which never sets one.
         update: {
           name: p.name, role: p.role, employeeId: p.employeeId, status: 'active',
           department: p.department, designation: p.designation,
+          passwordHash, mustChangePassword: false,
         },
         create: { ...p, passwordHash, status: 'active', mustChangePassword: false },
       })
