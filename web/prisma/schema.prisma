@@ -298,6 +298,11 @@ model Call {
   phone     String
   direction String @default("outbound")
 
+  /// The caller id the customer saw. Null when the engine does not report one
+  /// (LiveKit resolves it inside the SIP trunk), so it is shown as "not
+  /// reported" rather than being guessed.
+  fromNumber String?
+
   status CallStatus @default(initiated)
 
   /// LiveKit room name / SIP call id, used to correlate worker events.

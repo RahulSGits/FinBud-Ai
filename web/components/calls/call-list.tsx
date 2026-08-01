@@ -2,7 +2,10 @@
 
 import { useState } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
-import { PhoneCall, Search, Sparkles, X, FileText, Clock, Loader2, MessageCircle, Download } from 'lucide-react';
+import {
+  PhoneCall, Search, Sparkles, X, FileText, Clock, Loader2, MessageCircle, Download,
+  AlertTriangle, ArrowRight,
+} from 'lucide-react';
 import { toast } from 'sonner';
 import { ExportButton } from '@/components/export/export-button';
 import {
@@ -24,6 +27,10 @@ export interface CallRow {
   summary: string | null;
   transcriptText: string | null;
   startedAt: string;
+  /** The number the customer saw, when the engine reports one. */
+  fromNumber?: string | null;
+  /** Set only when the dial failed before connecting. */
+  failureReason?: string | null;
   /**
    * Optional so serialisers that predate WhatsApp follow-up keep compiling.
    * When it is absent the lead is resolved by phone number instead — contacts
@@ -172,9 +179,21 @@ export function CallList({ calls, showAgent = true }: { calls: CallRow[]; showAg
                       </td>
                       {showAgent && <td className="px-4 py-3 text-slate-600 dark:text-slate-300">{c.agentName || '—'}</td>}
                       <td className="px-4 py-3">
-                        <span className={cn('px-2 py-0.5 rounded-full text-[11px] font-medium', LEAD_TONE[c.leadStatus] ?? LEAD_TONE.unknown)}>
-                          {c.leadStatus.replace(/_/g, ' ')}
-                        </span>
+                        {/* A dial that never connected is not an outcome. Showing
+                            "unknown" beside a real result would read as "the
+                            customer said nothing", hiding a broken provider. */}
+                        {c.failureReason ? (
+                          <span
+                            title={c.failureReason}
+                            className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[11px] font-medium bg-red-100 dark:bg-red-500/10 text-red-700 dark:text-red-400"
+                          >
+                            <AlertTriangle className="w-3 h-3" /> not dispatched
+                          </span>
+                        ) : (
+                          <span className={cn('px-2 py-0.5 rounded-full text-[11px] font-medium', LEAD_TONE[c.leadStatus] ?? LEAD_TONE.unknown)}>
+                            {c.leadStatus.replace(/_/g, ' ')}
+                          </span>
+                        )}
                       </td>
                       <td className="px-4 py-3 text-right tabular-nums text-slate-600 dark:text-slate-300">{fmt(c.durationSec)}</td>
                       <td className="px-4 py-3 text-right text-xs text-slate-500">
@@ -239,6 +258,36 @@ export function CallList({ calls, showAgent = true }: { calls: CallRow[]; showAg
                   <Stat label="Duration" value={fmt(open.durationSec)} />
                   <Stat label="Status" value={open.status.replace(/_/g, ' ')} />
                 </div>
+
+                {/* Which line called which. Without the caller id there is no
+                    way to tell, from a record, which number the customer saw. */}
+                <div className="flex items-center gap-3 rounded-xl bg-slate-50 dark:bg-white/5 px-3.5 py-3">
+                  <div className="min-w-0 flex-1">
+                    <p className="text-[11px] text-slate-500 dark:text-slate-400">From</p>
+                    <p className="text-sm font-medium text-slate-900 dark:text-white tabular-nums truncate">
+                      {open.fromNumber ?? 'Not reported'}
+                    </p>
+                  </div>
+                  <ArrowRight className="w-4 h-4 shrink-0 text-slate-400" />
+                  <div className="min-w-0 flex-1 text-right">
+                    <p className="text-[11px] text-slate-500 dark:text-slate-400">To</p>
+                    <p className="text-sm font-medium text-slate-900 dark:text-white tabular-nums truncate">
+                      {open.phone}
+                    </p>
+                  </div>
+                </div>
+
+                {open.failureReason && (
+                  <div className="flex items-start gap-2.5 rounded-xl border border-red-500/20 bg-red-500/[0.06] px-3.5 py-3">
+                    <AlertTriangle className="w-4 h-4 text-red-600 dark:text-red-400 shrink-0 mt-0.5" />
+                    <div className="min-w-0">
+                      <p className="text-sm font-medium text-red-700 dark:text-red-300">Call was not dispatched</p>
+                      <p className="text-xs text-red-600/90 dark:text-red-400/80 mt-0.5 leading-relaxed">
+                        {open.failureReason.replace(/^Not dispatched:\s*/, '')}
+                      </p>
+                    </div>
+                  </div>
+                )}
 
                 {(open.contactId || open.contactName) && (
                   <button

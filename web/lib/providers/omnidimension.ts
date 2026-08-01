@@ -118,20 +118,42 @@ export class OmniDimensionProvider implements VoiceProvider {
     }
     const to = params.to.startsWith('+') ? params.to : `+${params.to.replace(/\D/g, '')}`;
 
+    // Pick the caller id up front so it can be recorded against the call and
+    // shown in the log. Dialling with none is the single most common reason a
+    // fully-configured account still cannot place a call, and the API's own
+    // error for it does not say so.
+    let from = params.fromNumberId ? { id: String(params.fromNumberId), number: null as string | null } : null;
+    if (!from) {
+      const numbers = await this.listPhoneNumbers().catch(() => []);
+      if (numbers.length === 0) {
+        throw new ProviderError(
+          'no phone number is provisioned on the OmniDimension account, so there is nothing to call from. ' +
+            'Buy a number in the OmniDimension dashboard (it also needs wallet credit), then try again.',
+          this.id,
+          409
+        );
+      }
+      from = { id: numbers[0].id, number: numbers[0].number ?? null };
+    }
+
     const data = await this.request('calls/dispatch', {
       method: 'POST',
       body: JSON.stringify({
         agent_id: agentId,
         to_number: to,
         call_context: params.metadata, // round-tripped back on the webhook
-        from_number_id: params.fromNumberId ? Number(params.fromNumberId) : null,
+        from_number_id: Number(from.id),
       }),
     });
 
     // Verified response: { success, status:"dispatched", requestId }
     const callId = data?.requestId ?? data?.call_id ?? data?.id;
     if (callId == null) throw new ProviderError('OmniDimension did not return a call id.', this.id);
-    return { providerCallId: String(callId), status: normaliseStatus(data?.status) };
+    return {
+      providerCallId: String(callId),
+      status: normaliseStatus(data?.status),
+      fromNumber: from.number ?? data?.from_number ?? null,
+    };
   }
 
   /**

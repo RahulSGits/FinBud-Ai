@@ -87,6 +87,26 @@ export async function placeCall(opts: {
     );
   }
 
+  // Engines with a server-side agent resource cannot dial one they have never
+  // been told about. That is the normal state for every agent authored while
+  // USE_MOCK_CALLS was true — sync is skipped in mock mode — so the first real
+  // call after switching over would otherwise fail with "agent must be synced"
+  // and stay broken until someone happened to re-save the agent. Sync on
+  // demand instead, and report the sync failure rather than a dial failure,
+  // because that is the thing that actually needs fixing.
+  let dialAgent = agent;
+  if (!isMockMode() && provider.capabilities().serverAgents && !agent.externalAgentId) {
+    const { syncAgent } = await import('../providers/sync');
+    const sync = await syncAgent(agent.id);
+    if (!sync.synced || !sync.externalAgentId) {
+      throw new CallError(
+        `Not dispatched: "${agent.name}" could not be published to ${provider.name}. ${sync.error ?? 'The sync failed.'}`,
+        502
+      );
+    }
+    dialAgent = (await db.agent.findUnique({ where: { id: agent.id } })) ?? agent;
+  }
+
   // Claim the contact before creating the call, so two clicks cannot double-dial.
   const claim = await db.contact.updateMany({
     where: { id: contact.id, status: { not: ContactStatus.calling } },
@@ -111,8 +131,8 @@ export async function placeCall(opts: {
   try {
     const result = await provider.startCall({
       to: contact.phone,
-      externalAgentId: agent.externalAgentId,
-      config: agentToConfig(agent),
+      externalAgentId: dialAgent.externalAgentId,
+      config: agentToConfig(dialAgent),
       metadata: {
         callLogId: call.id,
         agentId: agent.id,
@@ -124,7 +144,11 @@ export async function placeCall(opts: {
 
     await db.call.update({
       where: { id: call.id },
-      data: { providerCallId: result.providerCallId, status: result.status },
+      data: {
+        providerCallId: result.providerCallId,
+        status: result.status,
+        fromNumber: result.fromNumber ?? null,
+      },
     });
     await db.auditLog.create({
       data: { action: 'call.started', entity: 'Call', entityId: call.id, userId: opts.user.id },
@@ -133,7 +157,11 @@ export async function placeCall(opts: {
     return { callId: call.id, status: result.status as CallStatus, mock: isMockMode() };
   } catch (err: any) {
     // Keep the provider's own detail — a generic message hides the fix.
-    const reason = [err?.message, err?.detail].filter(Boolean).join(' — ').slice(0, 400);
+    const detail = [err?.message, err?.detail].filter(Boolean).join(' — ').slice(0, 400);
+    // "Not dispatched" is the honest framing: the call never reached the
+    // network, so this is not a customer who declined. The call log shows this
+    // string verbatim, which is the only place the cause is ever visible.
+    const reason = `Not dispatched: ${detail || 'the provider rejected the call.'}`;
 
     await db.call.update({
       where: { id: call.id },

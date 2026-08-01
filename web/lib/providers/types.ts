@@ -74,6 +74,11 @@ export interface StartCallParams {
 export interface StartCallResult {
   providerCallId: string;
   status: CallStatus;
+  /**
+   * The caller id the customer will see, when the engine reports one.
+   * Optional: LiveKit resolves it inside the SIP trunk and never tells us.
+   */
+  fromNumber?: string | null;
 }
 
 export interface VoiceOption {
