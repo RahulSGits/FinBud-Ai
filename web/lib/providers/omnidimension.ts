@@ -73,21 +73,80 @@ export class OmniDimensionProvider implements VoiceProvider {
     return res.status === 204 ? {} : res.json().catch(() => ({}));
   }
 
+  /**
+   * Model ids are stored provider-qualified ("openai/gpt-4o-mini") because
+   * LiveKit Inference needs the prefix. OmniDimension wants the bare name.
+   */
+  private static modelName(id: string | null | undefined): string {
+    return (id || 'gpt-4o-mini').split('/').pop() || 'gpt-4o-mini';
+  }
+
+  /**
+   * Voices are stored as "provider/voice_id" — OmniDimension needs both, and a
+   * bare id is ambiguous across ElevenLabs, Google, Deepgram and the rest.
+   * Older agents hold a bare id; assume ElevenLabs for those, which is the
+   * catalogue's default provider.
+   */
+  private static voice(id: string | null | undefined): { provider: string; voice_id: string } | null {
+    if (!id) return null;
+    const slash = id.indexOf('/');
+    if (slash === -1) return { provider: 'eleven_labs', voice_id: id };
+    return { provider: id.slice(0, slash), voice_id: id.slice(slash + 1) };
+  }
+
   /** OmniDimension models the prompt as titled context blocks. */
   private toAgentBody(config: AgentConfig): Record<string, any> {
     const sections = (config.sections ?? []).filter((s) => s.body?.trim());
+    // is_enabled per block is what lets the builder switch a section off
+    // without deleting it; omitting it makes every block permanently on.
     const context_breakdown = sections.length
-      ? sections.map((s) => ({ title: s.title, body: s.body.trim() }))
-      : [{ title: 'System Prompt', body: buildSystemPrompt(config) }];
+      ? sections.map((s) => ({ title: s.title, body: s.body.trim(), is_enabled: true }))
+      : [{ title: 'System Prompt', body: buildSystemPrompt(config), is_enabled: true }];
 
     const body: Record<string, any> = {
       name: config.name,
       context_breakdown,
       welcome_message: config.firstMessage || 'Hello!',
+      // This platform only ever dials out.
+      call_type: 'Outgoing',
+      // Field name is `model.model`, not `model.name` — the latter is silently
+      // ignored, leaving every agent on the account default.
+      model: {
+        model: OmniDimensionProvider.modelName(config.llmModel),
+        temperature: config.temperature ?? 0.7,
+      },
+      transcriber: {
+        provider: 'Soniox',
+        silence_timeout_ms: 400,
+        should_apply_noise_reduction: true,
+      },
+      is_interruption_allowed: true,
+      // Ask for the transcript and summary to be pushed back after the call.
+      // Without this the record shows a call happened and nothing about it.
+      post_call_actions: {
+        webhook: {
+          enabled: true,
+          include: ['summary', 'fullConversation', 'sentiment', 'extracted_variables'],
+        },
+      },
+      end_call: {
+        enabled: true,
+        condition:
+          'End the call when the customer says goodbye, asks to be removed, or the conversation is clearly finished.',
+        message: 'Thank you for your time. Have a good day.',
+      },
     };
-    if (config.llmModel) body.model = { name: config.llmModel, ...(config.temperature != null ? { temperature: config.temperature } : {}) };
-    if (config.voiceId) body.voice = { voice_id: config.voiceId };
-    if (config.language) body.language = config.language;
+
+    const voice = OmniDimensionProvider.voice(config.voiceId);
+    if (voice) body.voice = voice;
+
+    // Not in the SDK's named parameters, but forwarded through its **kwargs, so
+    // the API accepts it. India-first deployments need the Hindi pairing.
+    if (config.language) {
+      body.languages =
+        config.language === 'multi' ? ['English (India)', 'Hindi'] : [config.language];
+    }
+
     if (config.webhookUrl) body.webhook_url = config.webhookUrl;
     if (config.transferEnabled && config.transferNumber) body.transfer_number = config.transferNumber;
     return body;
@@ -167,28 +226,50 @@ export class OmniDimensionProvider implements VoiceProvider {
    */
   async endCall(): Promise<void> {}
 
+  /**
+   * Voices known to work well for Indian outbound calling, offered first.
+   *
+   * The full catalogue runs to hundreds of entries in no useful order, and the
+   * right choice for a Hindi/English lending call is not discoverable by
+   * scrolling it. Ids carry their provider because OmniDimension needs both.
+   */
+  private static readonly PINNED: VoiceOption[] = [
+    { id: 'eleven_labs/swh0hLPsEaD50F02tIJJ', name: 'ElevenLabs — Indian English (recommended)', provider: 'eleven_labs', language: 'en-IN' },
+    { id: 'eleven_labs/IYUZs7LoFwd5QZsMgrMU', name: 'ElevenLabs — alternate', provider: 'eleven_labs', language: 'en-IN' },
+    { id: 'google/en-in-Chirp3-HD-Achernar', name: 'Google Chirp3 HD — Achernar', provider: 'google', language: 'en-IN' },
+    { id: 'google/en-in-Chirp3-HD-Achird', name: 'Google Chirp3 HD — Achird', provider: 'google', language: 'en-IN' },
+  ];
+
   async listVoices(): Promise<VoiceOption[]> {
+    let catalogue: VoiceOption[] = [];
     try {
       // page_size is explicit: the API defaults to 30, which silently truncates
       // a catalogue running to hundreds of voices.
       const data = await this.request('providers/voices?page=1&page_size=200', { method: 'GET' });
       const raw = Array.isArray(data) ? data : data?.voices || data?.json?.voices || [];
-      if (Array.isArray(raw) && raw.length) {
-        return raw.map((v: any) => ({
-          id: String(v.voice_id ?? v.id),
-          // display_name is the human one ("luna"); name is the technical id
-          // ("aura-luna-en"). Show the friendly one, fall back to the other.
-          name: v.display_name ?? v.name ?? String(v.voice_id ?? v.id),
-          provider: v.service ?? v.provider ?? 'omnidimension',
-          language: v.language ?? v.accent,
-          gender: v.gender,
-          previewUrl: v.sample_url ?? v.preview_url,
-        }));
+      if (Array.isArray(raw)) {
+        catalogue = raw.map((v: any) => {
+          const service = v.service ?? v.provider ?? 'eleven_labs';
+          const voiceId = String(v.voice_id ?? v.name ?? v.id);
+          return {
+            // Qualified so the dial-time payload can name the provider.
+            id: `${service}/${voiceId}`,
+            // display_name is the human one ("luna"); name is the technical id
+            // ("aura-luna-en"). Show the friendly one, fall back to the other.
+            name: v.display_name ?? v.name ?? voiceId,
+            provider: service,
+            language: v.language ?? v.accent,
+            gender: v.gender,
+            previewUrl: v.sample_url ?? v.preview_url,
+          };
+        });
       }
     } catch {
-      /* fall through */
+      /* the pinned list still gives the builder something usable */
     }
-    return [];
+
+    const seen = new Set(OmniDimensionProvider.PINNED.map((v) => v.id));
+    return [...OmniDimensionProvider.PINNED, ...catalogue.filter((v) => !seen.has(v.id))];
   }
 
   async listModels(): Promise<ModelOption[]> {
@@ -270,6 +351,55 @@ export class OmniDimensionProvider implements VoiceProvider {
     return [];
   }
 
+  /**
+   * Pull the conversation out of a post-call payload.
+   *
+   * `post_call_actions.webhook` delivers it as `fullConversation`, but the key
+   * and shape vary across event types (array of turns, or one blob of text), so
+   * every known form is normalised to the {role, text} turns the call record
+   * renders. Getting this wrong shows a completed call with an empty
+   * transcript, which is indistinguishable from a call nobody spoke on.
+   */
+  private static conversation(payload: any): {
+    turns: { role: string; text: string }[] | null;
+    text: string | null;
+  } {
+    const raw =
+      payload?.fullConversation ??
+      payload?.full_conversation ??
+      payload?.conversation ??
+      payload?.transcript ??
+      null;
+
+    if (!raw) return { turns: null, text: null };
+
+    if (typeof raw === 'string') {
+      return { turns: null, text: raw };
+    }
+
+    if (Array.isArray(raw)) {
+      const turns = raw
+        .map((t: any) => {
+          const speaker = String(t?.role ?? t?.speaker ?? t?.from ?? '').toLowerCase();
+          const text = String(t?.text ?? t?.content ?? t?.message ?? '').trim();
+          if (!text) return null;
+          // Anything that is not clearly the customer is the agent: an unknown
+          // label rendered as "Customer" would misattribute what was said.
+          const role = /user|customer|human|caller/.test(speaker) ? 'user' : 'assistant';
+          return { role, text };
+        })
+        .filter((t): t is { role: string; text: string } => t !== null);
+
+      if (!turns.length) return { turns: null, text: null };
+      return {
+        turns,
+        text: turns.map((t) => `${t.role === 'user' ? 'Customer' : 'Agent'}: ${t.text}`).join('\n'),
+      };
+    }
+
+    return { turns: null, text: null };
+  }
+
   parseWebhook(payload: any): VoiceEvent {
     // OmniDimension echoes call_context back on its events.
     const ctx = payload?.call_context ?? payload?.context ?? payload?.data?.call_context ?? {};
@@ -284,14 +414,15 @@ export class OmniDimensionProvider implements VoiceProvider {
     if (type === 'transcript' || payload?.transcript_chunk) {
       return { kind: 'transcript', callId, transcript: payload.transcript_chunk || payload.transcript || '' };
     }
-    if (['call_ended', 'completed'].includes(type) || payload?.call_summary) {
+    if (['call_ended', 'completed'].includes(type) || payload?.call_summary || payload?.fullConversation) {
       const sentiment = String(payload?.sentiment ?? '').toLowerCase();
+      const conversation = OmniDimensionProvider.conversation(payload);
       const report: CallReport = {
         durationSec: Number(payload?.duration ?? payload?.call_duration ?? 0) || 0,
         endedReason: payload?.end_reason || 'Completed',
         recordingUrl: payload?.recording_url || null,
-        transcript: Array.isArray(payload?.transcript) ? payload.transcript : null,
-        transcriptText: typeof payload?.transcript === 'string' ? payload.transcript : null,
+        transcript: conversation.turns,
+        transcriptText: conversation.text,
         summary: payload?.call_summary || payload?.summary || null,
         interested: sentiment === 'positive' || payload?.lead_qualified === true,
         leadStatus: payload?.lead_status || null,
