@@ -177,22 +177,18 @@ export class OmniDimensionProvider implements VoiceProvider {
     }
     const to = params.to.startsWith('+') ? params.to : `+${params.to.replace(/\D/g, '')}`;
 
-    // Pick the caller id up front so it can be recorded against the call and
-    // shown in the log. Dialling with none is the single most common reason a
-    // fully-configured account still cannot place a call, and the API's own
-    // error for it does not say so.
+    // Resolve a caller id if the account has one, so it can be recorded against
+    // the call and shown in the log.
+    //
+    // An empty list is NOT treated as fatal. Trial accounts dial from a shared
+    // number that never appears in phone_number/list, so refusing here would
+    // block the one path such an account has — better to send the dispatch and
+    // let OmniDimension answer, since its rejection is the authoritative one
+    // and is surfaced verbatim as the "not dispatched" reason.
     let from = params.fromNumberId ? { id: String(params.fromNumberId), number: null as string | null } : null;
     if (!from) {
       const numbers = await this.listPhoneNumbers().catch(() => []);
-      if (numbers.length === 0) {
-        throw new ProviderError(
-          'no phone number is provisioned on the OmniDimension account, so there is nothing to call from. ' +
-            'Buy a number in the OmniDimension dashboard (it also needs wallet credit), then try again.',
-          this.id,
-          409
-        );
-      }
-      from = { id: numbers[0].id, number: numbers[0].number ?? null };
+      if (numbers.length) from = { id: numbers[0].id, number: numbers[0].number ?? null };
     }
 
     const data = await this.request('calls/dispatch', {
@@ -201,7 +197,8 @@ export class OmniDimensionProvider implements VoiceProvider {
         agent_id: agentId,
         to_number: to,
         call_context: params.metadata, // round-tripped back on the webhook
-        from_number_id: Number(from.id),
+        // null is a valid value: it asks the account to use its default line.
+        from_number_id: from ? Number(from.id) : null,
       }),
     });
 
@@ -211,7 +208,9 @@ export class OmniDimensionProvider implements VoiceProvider {
     return {
       providerCallId: String(callId),
       status: normaliseStatus(data?.status),
-      fromNumber: from.number ?? data?.from_number ?? null,
+      // Prefer whatever the dispatch response reports: on a trial account the
+      // line used is only known after the fact.
+      fromNumber: data?.from_number ?? from?.number ?? null,
     };
   }
 
