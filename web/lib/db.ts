@@ -2,7 +2,41 @@ import { Prisma, PrismaClient } from '@prisma/client';
 
 const globalForPrisma = globalThis as unknown as { prisma: PrismaClient };
 
-export const db = globalForPrisma.prisma || new PrismaClient();
+/**
+ * Pool sizing, applied here rather than left to whoever pasted the URL.
+ *
+ * Prisma's default pool is `num_cpus * 2 + 1` — three connections on a
+ * single-core serverless instance. Pages here deliberately fan out a dozen or
+ * more queries in one `Promise.all`, so on a small pool they queue four deep,
+ * and against a database in another region each wave costs a full round trip.
+ * That turned the admin pages into eleven-second renders that intermittently
+ * exceeded the pool timeout and 500'd.
+ *
+ * Ten concurrent connections is comfortable against Supabase's defaults (pool
+ * size 15, 200 max clients) and collapses those waves into one. An explicit
+ * value in the URL always wins — this only fills in what is missing.
+ */
+function tunedUrl(): string | undefined {
+  const raw = process.env.DATABASE_URL;
+  if (!raw) return undefined;
+
+  try {
+    const url = new URL(raw);
+    if (!url.searchParams.has('connection_limit')) url.searchParams.set('connection_limit', '10');
+    if (!url.searchParams.has('pool_timeout')) url.searchParams.set('pool_timeout', '20');
+    return url.toString();
+  } catch {
+    // Unparseable URLs are Prisma's problem to report, not ours to mangle.
+    return raw;
+  }
+}
+
+function client(): PrismaClient {
+  const url = tunedUrl();
+  return url ? new PrismaClient({ datasources: { db: { url } } }) : new PrismaClient();
+}
+
+export const db = globalForPrisma.prisma || client();
 
 if (process.env.NODE_ENV !== 'production') globalForPrisma.prisma = db;
 
