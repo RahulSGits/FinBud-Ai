@@ -19,8 +19,8 @@
 // OmniDimension agent ids are integers, unlike our string ids, so we coerce at
 // the boundary.
 import {
-  AgentConfig, CallReport, LanguageOption, ModelOption, PhoneNumberOption,
-  ProviderCapabilities, ProviderError, StartCallParams, StartCallResult,
+  AgentConfig, CallReport, CallStatus, FetchedCallResult, LanguageOption, ModelOption,
+  PhoneNumberOption, ProviderCapabilities, ProviderError, StartCallParams, StartCallResult,
   VoiceEvent, VoiceOption, VoiceProvider, buildSystemPrompt, normaliseStatus,
 } from './types';
 
@@ -47,7 +47,18 @@ export class OmniDimensionProvider implements VoiceProvider {
     return { serverAgents: true, knowledgeBase: false, phoneNumbers: true, voiceCatalogue: true, webhooks: true };
   }
 
-  private async request(path: string, init: RequestInit): Promise<any> {
+  /**
+   * `notFoundIsNull` exists for the reconciliation poll. Everywhere else a 404
+   * is a bug worth surfacing, but "OmniDimension has never heard of this call"
+   * is a fact about the call, not a transport failure — the caller has to be
+   * able to tell the two apart, because one means "leave the row alone" and the
+   * other means "try again later".
+   */
+  private async request(
+    path: string,
+    init: RequestInit,
+    opts?: { notFoundIsNull?: boolean }
+  ): Promise<any> {
     const key = this.key();
     if (!key) throw new ProviderError('OmniDimension API key is not configured.', this.id, 503);
 
@@ -60,6 +71,8 @@ export class OmniDimensionProvider implements VoiceProvider {
         ...(init.headers || {}),
       },
     });
+
+    if (res.status === 404 && opts?.notFoundIsNull) return null;
 
     if (!res.ok) {
       const detail = await res.text().catch(() => '');
@@ -350,35 +363,113 @@ export class OmniDimensionProvider implements VoiceProvider {
     return [];
   }
 
+  // -------------------------------------------------------------------------
+  // Result normalisation
+  //
+  // The webhook and the reconciliation poll describe the SAME call, so they
+  // share one mapper. Two mappers would drift, and a polled call would then
+  // disagree with a delivered one about its own transcript — the exact class of
+  // bug that is impossible to spot, because whichever path ran is invisible
+  // from the record it produced.
+  // -------------------------------------------------------------------------
+
+  /** First present, non-empty value among several spellings of one field. */
+  private static pick(source: any, keys: string[]): any {
+    if (!source || typeof source !== 'object') return undefined;
+    for (const key of keys) {
+      const value = source[key];
+      if (value !== undefined && value !== null && value !== '') return value;
+    }
+    return undefined;
+  }
+
+  /** Coerce a value that may arrive as text, a number or a list into text. */
+  private static text(value: any): string | null {
+    if (value == null) return null;
+    if (Array.isArray(value)) {
+      const joined = value
+        .map((v) =>
+          v && typeof v === 'object'
+            ? String(v.text ?? v.value ?? v.objection ?? v.name ?? '').trim()
+            : String(v ?? '').trim()
+        )
+        .filter(Boolean)
+        .join('; ');
+      return joined || null;
+    }
+    if (typeof value === 'object') return null;
+    const s = String(value).trim();
+    return s || null;
+  }
+
+  /**
+   * Post-call variables the agent extracted. Delivered as an object on the
+   * webhook and as a list of {key, value} pairs on some log rows, so both are
+   * flattened to a plain lookup before anything reads from them.
+   */
+  private static extracted(payload: any): Record<string, any> {
+    const raw = OmniDimensionProvider.pick(payload, [
+      'extracted_variables', 'extractedVariables', 'variables',
+    ]);
+    if (!raw) return {};
+    if (Array.isArray(raw)) {
+      const out: Record<string, any> = {};
+      for (const item of raw) {
+        const key = item?.key ?? item?.name ?? item?.variable;
+        if (key) out[String(key)] = item?.value ?? item?.val ?? null;
+      }
+      return out;
+    }
+    return typeof raw === 'object' ? (raw as Record<string, any>) : {};
+  }
+
   /**
    * Pull the conversation out of a post-call payload.
    *
    * `post_call_actions.webhook` delivers it as `fullConversation`, but the key
-   * and shape vary across event types (array of turns, or one blob of text), so
-   * every known form is normalised to the {role, text} turns the call record
-   * renders. Getting this wrong shows a completed call with an empty
-   * transcript, which is indistinguishable from a call nobody spoke on.
+   * and shape vary across event types and across the call-log endpoint (array
+   * of turns, a wrapper object around them, one blob of text, or that array
+   * JSON-encoded into a string), so every known form is normalised to the
+   * {role, text} turns the call record renders. Getting this wrong shows a
+   * completed call with an empty transcript, which is indistinguishable from a
+   * call nobody spoke on.
    */
   private static conversation(payload: any): {
     turns: { role: string; text: string }[] | null;
     text: string | null;
   } {
-    const raw =
-      payload?.fullConversation ??
-      payload?.full_conversation ??
-      payload?.conversation ??
-      payload?.transcript ??
-      null;
-
+    let raw: any = OmniDimensionProvider.pick(payload, [
+      'fullConversation', 'full_conversation', 'conversation', 'transcript',
+    ]);
     if (!raw) return { turns: null, text: null };
 
     if (typeof raw === 'string') {
-      return { turns: null, text: raw };
+      const trimmed = raw.trim();
+      // Some events carry the turns JSON-encoded rather than as JSON.
+      if (trimmed.startsWith('[') || trimmed.startsWith('{')) {
+        try {
+          raw = JSON.parse(trimmed);
+        } catch {
+          return { turns: null, text: trimmed || null };
+        }
+      } else {
+        return { turns: null, text: trimmed || null };
+      }
+    }
+
+    // A wrapper around the turns rather than the turns themselves.
+    if (raw && !Array.isArray(raw) && typeof raw === 'object') {
+      raw = OmniDimensionProvider.pick(raw, ['turns', 'messages', 'conversation', 'transcript', 'items']);
+      if (typeof raw === 'string') return { turns: null, text: raw.trim() || null };
     }
 
     if (Array.isArray(raw)) {
       const turns = raw
         .map((t: any) => {
+          if (typeof t === 'string') {
+            const line = t.trim();
+            return line ? { role: 'assistant', text: line } : null;
+          }
           const speaker = String(t?.role ?? t?.speaker ?? t?.from ?? '').toLowerCase();
           const text = String(t?.text ?? t?.content ?? t?.message ?? '').trim();
           if (!text) return null;
@@ -399,6 +490,152 @@ export class OmniDimensionProvider implements VoiceProvider {
     return { turns: null, text: null };
   }
 
+  /**
+   * Finished-call payload -> CallReport. The one mapper, used by both the
+   * webhook parser and the poll.
+   */
+  private static toReport(payload: any): CallReport {
+    const pick = OmniDimensionProvider.pick;
+    const text = OmniDimensionProvider.text;
+    const vars = OmniDimensionProvider.extracted(payload);
+    const conversation = OmniDimensionProvider.conversation(payload);
+
+    const sentiment = text(pick(payload, ['sentiment', 'call_sentiment']) ?? pick(vars, ['sentiment']));
+    const qualified =
+      pick(payload, ['lead_qualified', 'is_qualified']) ??
+      pick(vars, ['lead_qualified', 'is_qualified', 'interested']);
+
+    const duration = Number(
+      pick(payload, ['duration', 'call_duration', 'duration_seconds', 'callDuration']) ?? 0
+    );
+    const score = Number(pick(payload, ['lead_score']) ?? pick(vars, ['lead_score', 'score']) ?? NaN);
+
+    return {
+      durationSec: Number.isFinite(duration) ? Math.max(0, Math.round(duration)) : 0,
+      endedReason:
+        text(pick(payload, ['end_reason', 'endReason', 'call_end_reason', 'disconnection_reason'])) ??
+        'Completed',
+      recordingUrl: text(pick(payload, ['recording_url', 'recordingUrl', 'audio_url', 'call_recording_url'])),
+      transcript: conversation.turns,
+      transcriptText: conversation.text,
+      summary:
+        text(pick(payload, ['call_summary', 'summary', 'conversation_summary'])) ??
+        text(pick(vars, ['summary'])),
+      // A string "true" counts: extracted variables come back as text.
+      interested:
+        (sentiment ?? '').toLowerCase() === 'positive' ||
+        qualified === true ||
+        String(qualified).toLowerCase() === 'true',
+      leadStatus: text(pick(payload, ['lead_status'])) ?? text(pick(vars, ['lead_status', 'leadStatus'])),
+      leadScore: Number.isFinite(score) ? Math.round(score) : null,
+      sentiment,
+      customerIntent:
+        text(pick(payload, ['intent', 'customer_intent'])) ??
+        text(pick(vars, ['intent', 'customer_intent'])),
+      nextAction:
+        text(pick(payload, ['next_action'])) ?? text(pick(vars, ['next_action', 'nextAction'])),
+      objections: text(pick(payload, ['objections'])) ?? text(pick(vars, ['objections'])),
+    };
+  }
+
+  /**
+   * The call-log endpoint wraps its row differently depending on the account
+   * and the SDK version, so the row is located rather than assumed. A body that
+   * holds no recognisable log row (an error object, an empty envelope) yields
+   * null, which the caller reads as "nothing learned".
+   */
+  private static unwrapLog(data: any): any | null {
+    if (!data || typeof data !== 'object') return null;
+    if (data.success === false) return null;
+
+    const candidates = [data.json, data.data, data.call_log, data.callLog, data.log, data.call, data.result, data];
+    for (const c of candidates) {
+      if (!c || typeof c !== 'object' || Array.isArray(c)) continue;
+      const looksLikeLog =
+        c.call_status != null || c.call_id != null || c.fullConversation != null ||
+        c.full_conversation != null || c.call_summary != null ||
+        (c.id != null && c !== data);
+      if (looksLikeLog) return c;
+    }
+    // The top level may still be the row itself, with only an id to prove it.
+    // A numeric `status` is the envelope's HTTP code, not the call's, so only a
+    // textual one counts — otherwise a bare `{success:true,status:200}` would be
+    // read as a live call and the row would be moved on the strength of nothing.
+    return data.id != null || typeof data.status === 'string' ? data : null;
+  }
+
+  /**
+   * Canonical status for a log row.
+   *
+   * `normaliseStatus` deliberately answers "initiated" for a word it does not
+   * recognise, so the campaign runner can never over-dial by assuming a live
+   * call ended. Here that same default has the opposite cost: it would strand a
+   * finished call in flight forever. So when the vendor's word is missing or
+   * unrecognised, evidence that the call produced an outcome wins.
+   */
+  private static logStatus(log: any): CallStatus {
+    const raw = OmniDimensionProvider.pick(log, ['call_status', 'status', 'call_state', 'state']);
+    const explicit = raw != null ? normaliseStatus(String(raw)) : null;
+    if (explicit && explicit !== 'initiated') return explicit;
+
+    // Duration is deliberately not evidence: a live call reports elapsed
+    // seconds too, and treating that as an ending would cut the record short.
+    const ended = OmniDimensionProvider.pick(log, [
+      'fullConversation', 'full_conversation', 'conversation', 'transcript',
+      'call_summary', 'summary', 'end_time', 'ended_at', 'call_end_time', 'end_reason',
+    ]);
+    if (ended) return 'completed';
+
+    return explicit ?? 'in_progress';
+  }
+
+  /**
+   * Ask OmniDimension what became of a call we dispatched.
+   *
+   * The dispatch `requestId` we store as providerCallId is the id this log is
+   * keyed by. A 404 means the account has no such call — the row is left to the
+   * stale reaper rather than being guessed at — while anything else throws, so
+   * a blip is retried on the next pass instead of being recorded as an outcome.
+   */
+  async fetchCallResult(providerCallId: string): Promise<FetchedCallResult | null> {
+    const id = String(providerCallId ?? '').trim();
+    if (!id) return null;
+
+    const data = await this.request(
+      `calls/logs/${encodeURIComponent(id)}`,
+      { method: 'GET' },
+      { notFoundIsNull: true }
+    );
+    if (data == null) return null;
+
+    const log = OmniDimensionProvider.unwrapLog(data);
+    if (!log) return null;
+
+    const status = OmniDimensionProvider.logStatus(log);
+    if (status !== 'completed' && status !== 'failed') return { status };
+
+    const report = OmniDimensionProvider.toReport(log);
+
+    if (status === 'failed') {
+      // A call that never connected is retryable, and only the lead status says
+      // so. Left blank it would resolve to "unknown", which stops the contact
+      // dead as though the conversation had happened and gone nowhere.
+      if (!report.leadStatus) report.leadStatus = 'no_answer';
+      // The shared mapper falls back to "Completed", which is the wrong story
+      // for a call that did not complete. OmniDimension's own word for the
+      // ending ("busy", "no-answer") is what someone reading the log needs.
+      report.endedReason =
+        OmniDimensionProvider.text(
+          OmniDimensionProvider.pick(log, [
+            'end_reason', 'endReason', 'call_end_reason', 'disconnection_reason',
+            'call_status', 'status',
+          ])
+        ) ?? 'the provider reported no outcome';
+    }
+
+    return { status, report };
+  }
+
   parseWebhook(payload: any): VoiceEvent {
     // OmniDimension echoes call_context back on its events.
     const ctx = payload?.call_context ?? payload?.context ?? payload?.data?.call_context ?? {};
@@ -414,24 +651,7 @@ export class OmniDimensionProvider implements VoiceProvider {
       return { kind: 'transcript', callId, transcript: payload.transcript_chunk || payload.transcript || '' };
     }
     if (['call_ended', 'completed'].includes(type) || payload?.call_summary || payload?.fullConversation) {
-      const sentiment = String(payload?.sentiment ?? '').toLowerCase();
-      const conversation = OmniDimensionProvider.conversation(payload);
-      const report: CallReport = {
-        durationSec: Number(payload?.duration ?? payload?.call_duration ?? 0) || 0,
-        endedReason: payload?.end_reason || 'Completed',
-        recordingUrl: payload?.recording_url || null,
-        transcript: conversation.turns,
-        transcriptText: conversation.text,
-        summary: payload?.call_summary || payload?.summary || null,
-        interested: sentiment === 'positive' || payload?.lead_qualified === true,
-        leadStatus: payload?.lead_status || null,
-        leadScore: payload?.lead_score ?? null,
-        sentiment: payload?.sentiment || null,
-        customerIntent: payload?.intent || null,
-        nextAction: payload?.next_action || null,
-        objections: payload?.objections || null,
-      };
-      return { kind: 'end', callId, report };
+      return { kind: 'end', callId, report: OmniDimensionProvider.toReport(payload) };
     }
     return { kind: 'ignored', callId };
   }

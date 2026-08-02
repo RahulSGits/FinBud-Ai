@@ -76,4 +76,9 @@ export class MockProvider implements VoiceProvider {
     if (!callId) return { kind: 'ignored' };
     return { kind: 'status', callId, status: normaliseStatus(payload.status || 'completed') };
   }
+
+  // `fetchCallResult` is deliberately not implemented. The simulator writes its
+  // results straight to the database, so there is no remote truth to reconcile
+  // against — and in mock mode every agent resolves here, which is exactly what
+  // keeps the reconciler from making network calls during local development.
 }

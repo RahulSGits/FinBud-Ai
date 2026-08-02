@@ -1,9 +1,10 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import { AnimatePresence, motion, useReducedMotion } from 'motion/react';
 import { PhoneCall, PhoneOff, Radio } from 'lucide-react';
 import { Waveform, type WaveState } from './waveform';
+import { freshnessLabel, useLiveRefresh } from '@/hooks/use-live-refresh';
 import { cn } from '@/lib/utils';
 
 export interface LiveCall {
@@ -14,6 +15,8 @@ export interface LiveCall {
   agentName?: string | null;
   startedAt?: string | null;
 }
+
+const LIVE_STATUSES = ['initiated', 'ringing', 'in_progress'];
 
 function waveStateFor(status: string): WaveState {
   const s = status.toLowerCase();
@@ -32,62 +35,72 @@ function elapsed(from?: string | null, now = Date.now()): string {
  * Live call rail.
  *
  * Polls rather than subscribes: calls change state every few seconds at most,
- * and polling survives a dropped connection without reconnection logic. It also
- * nudges the campaign runner, so an open dashboard keeps campaigns moving.
+ * and polling survives a dropped connection without any reconnection logic.
+ *
+ * It polls *only* while a call is in flight. An idle dashboard left open on a
+ * desk should make no requests at all — the provider sync behind each tick
+ * costs quota, and there is nothing to learn when nothing is dialling. New work
+ * arrives via the refresh that whatever started it already performs.
  */
-export function LiveCallsPanel({ initialCalls }: { initialCalls: LiveCall[] }) {
+export function LiveCallsPanel({
+  initialCalls,
+  liveCount,
+}: {
+  initialCalls: LiveCall[];
+  /**
+   * True number in flight, when the page knows it. The rail lists only the most
+   * recent handful, so on a big campaign its own length would under-report.
+   */
+  liveCount?: number;
+}) {
   const reduced = useReducedMotion() ?? false;
-  const [calls, setCalls] = useState<LiveCall[]>(initialCalls);
   const [now, setNow] = useState(() => Date.now());
+  // Before the first tick lands, the data on screen is as old as this render.
+  const [mountedAt] = useState(() => Date.now());
 
-  useEffect(() => {
-    let cancelled = false;
+  // The prop is the source of truth, not merely a seed: every tick ends in
+  // router.refresh(), so the server hands down the current rail each time.
+  const calls = useMemo(
+    () => initialCalls.filter((c) => LIVE_STATUSES.includes(c.status)),
+    [initialCalls]
+  );
+  const active = calls.length > 0;
+  const total = Math.max(liveCount ?? 0, calls.length);
 
-    const poll = async () => {
-      try {
-        // Advance any running campaign, then read the current state.
-        await fetch('/api/campaigns/tick', { method: 'POST' }).catch(() => {});
-        const res = await fetch('/api/calls?limit=100');
-        if (!res.ok || cancelled) return;
-
-        const all = await res.json();
-        setCalls(
-          all
-            .filter((c: any) => ['initiated', 'ringing', 'in_progress'].includes(c.status))
-            .map((c: any) => ({
-              id: c.id,
-              phone: c.phone,
-              name: c.contact?.name ?? null,
-              status: c.status,
-              agentName: c.agent?.name ?? null,
-              startedAt: c.startedAt,
-            }))
-        );
-      } catch {
-        // Ignore: the next tick will retry.
-      }
-    };
-
-    const pollTimer = setInterval(poll, 4000);
-    // Separate, faster timer so the elapsed clock ticks smoothly between polls.
-    const clockTimer = setInterval(() => setNow(Date.now()), 1000);
-
-    return () => {
-      cancelled = true;
-      clearInterval(pollTimer);
-      clearInterval(clockTimer);
-    };
+  const onTick = useCallback(async () => {
+    // Independent and both swallowed: a provider hiccup on the sync must not
+    // also cost the campaign nudge, and neither must stop the refresh that
+    // follows — the database has moved on regardless of what the vendor said.
+    await Promise.all([
+      // Pull finished results in from the provider.
+      fetch('/api/calls/sync', { method: 'POST' }).catch(() => null),
+      // An open dashboard is what advances campaigns between scheduled ticks,
+      // so keep nudging the runner while calls are still flowing.
+      fetch('/api/campaigns/tick', { method: 'POST' }).catch(() => null),
+    ]);
   }, []);
 
-  const active = calls.length > 0;
+  const { pending, lastUpdatedAt } = useLiveRefresh({
+    enabled: active,
+    intervalMs: 5000,
+    onTick,
+  });
+
+  // One shared 1s clock driving both the elapsed timers and the freshness line.
+  // It runs only while something is live, for the same reason the poll does.
+  useEffect(() => {
+    if (!active) return;
+    const clock = setInterval(() => setNow(Date.now()), 1000);
+    return () => clearInterval(clock);
+  }, [active]);
 
   return (
     <section
       aria-label="Live calls"
       className="rounded-2xl border border-slate-200 dark:border-white/10 bg-white dark:bg-white/[0.03] overflow-hidden"
     >
-      <header className="flex items-center justify-between px-5 py-3 border-b border-slate-200 dark:border-white/10">
-        <div className="flex items-center gap-2.5">
+      <header className="flex items-center justify-between gap-3 px-5 py-3 border-b border-slate-200 dark:border-white/10">
+        <div className="flex items-center gap-2.5 min-w-0">
           <span className="relative flex w-2.5 h-2.5">
             {active && !reduced && (
               <span className="absolute inline-flex w-full h-full rounded-full bg-brand-400 opacity-75 animate-ping" />
@@ -96,10 +109,29 @@ export function LiveCallsPanel({ initialCalls }: { initialCalls: LiveCall[] }) {
           </span>
           <h2 className="text-sm font-semibold text-slate-900 dark:text-white">Live calls</h2>
           <span className="text-xs font-medium tabular-nums text-slate-500 dark:text-slate-400">
-            {active ? `${calls.length} in progress` : 'none active'}
+            {active ? `${total} in progress` : 'none active'}
           </span>
         </div>
-        <Radio className={cn('w-4 h-4', active ? 'text-brand-500' : 'text-slate-400 dark:text-slate-600')} />
+
+        <div className="flex items-center gap-2.5 shrink-0">
+          {/* Says the view is current rather than abandoned — the difference
+              between "nothing has happened" and "nothing is being fetched". */}
+          {active && (
+            <span
+              title="This view refreshes itself every few seconds"
+              className="hidden sm:inline-flex items-center gap-1.5 text-[11px] font-medium tabular-nums text-slate-500 dark:text-slate-400"
+            >
+              <span
+                className={cn(
+                  'w-1.5 h-1.5 rounded-full',
+                  pending ? 'bg-brand-500 motion-safe:animate-pulse' : 'bg-emerald-500'
+                )}
+              />
+              {freshnessLabel(lastUpdatedAt ?? mountedAt, now)}
+            </span>
+          )}
+          <Radio className={cn('w-4 h-4', active ? 'text-brand-500' : 'text-slate-400 dark:text-slate-600')} />
+        </div>
       </header>
 
       <AnimatePresence mode="popLayout" initial={false}>
@@ -145,6 +177,12 @@ export function LiveCallsPanel({ initialCalls }: { initialCalls: LiveCall[] }) {
           </motion.div>
         )}
       </AnimatePresence>
+
+      {total > calls.length && (
+        <p className="px-5 py-2.5 border-t border-slate-200 dark:border-white/[0.06] text-[11px] font-medium tabular-nums text-slate-500 dark:text-slate-400">
+          +{total - calls.length} more in progress
+        </p>
+      )}
     </section>
   );
 }

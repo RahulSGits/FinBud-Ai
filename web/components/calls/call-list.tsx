@@ -1,6 +1,6 @@
 'use client';
 
-import { useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
 import {
   PhoneCall, Search, Sparkles, X, FileText, Clock, Loader2, MessageCircle, Download,
@@ -13,6 +13,7 @@ import {
   type MessageRecipient,
   type SendMessageTarget,
 } from '@/components/messaging/send-message-dialog';
+import { freshnessLabel, useLiveRefresh } from '@/hooks/use-live-refresh';
 import { cn } from '@/lib/utils';
 
 export interface CallRow {
@@ -48,15 +49,25 @@ const LEAD_TONE: Record<string, string> = {
   unknown: 'bg-slate-100 dark:bg-white/5 text-slate-500',
 };
 
+/** Statuses whose row is still going to change on its own. */
+const LIVE_STATUSES = ['initiated', 'ringing', 'in_progress'];
+
 function fmt(sec: number) {
   return `${Math.floor(sec / 60)}:${String(sec % 60).padStart(2, '0')}`;
 }
 
 export function CallList({ calls, showAgent = true }: { calls: CallRow[]; showAgent?: boolean }) {
   const [q, setQ] = useState('');
-  const [open, setOpen] = useState<CallRow | null>(null);
+  // Held as an id, not a row, so the open panel follows the polled data: a call
+  // that gains a transcript or a summary mid-poll updates in place rather than
+  // waiting for the operator to close and reopen it.
+  const [openId, setOpenId] = useState<string | null>(null);
   const [sendTarget, setSendTarget] = useState<SendMessageTarget | null>(null);
   const [resolving, setResolving] = useState<string | null>(null);
+  const [now, setNow] = useState(() => Date.now());
+  const [mountedAt] = useState(() => Date.now());
+
+  const open = useMemo(() => calls.find((c) => c.id === openId) ?? null, [calls, openId]);
 
   const filtered = calls.filter((c) => {
     if (!q) return true;
@@ -67,6 +78,31 @@ export function CallList({ calls, showAgent = true }: { calls: CallRow[]; showAg
       (c.campaignName ?? '').toLowerCase().includes(t)
     );
   });
+
+  // A finished log never changes by itself, so it is not worth a single request.
+  // Poll only while a row is still in flight, and gently: unlike the dashboard
+  // rail this is a record to read, not a monitor to watch.
+  const live = calls.some((c) => LIVE_STATUSES.includes(c.status));
+
+  const onTick = useCallback(async () => {
+    // Results land in the database from the provider here; the refresh the hook
+    // performs next is what puts them on screen. Swallowed on purpose — a dead
+    // sync must not also cost the refresh, since a webhook may well have
+    // delivered the same result already.
+    await fetch('/api/calls/sync', { method: 'POST' }).catch(() => null);
+  }, []);
+
+  const { pending, lastUpdatedAt } = useLiveRefresh({
+    enabled: live,
+    intervalMs: 8000,
+    onTick,
+  });
+
+  useEffect(() => {
+    if (!live) return;
+    const clock = setInterval(() => setNow(Date.now()), 1000);
+    return () => clearInterval(clock);
+  }, [live]);
 
   /**
    * A call is only worth messaging when it is tied to a lead. The id is used
@@ -127,6 +163,21 @@ export function CallList({ calls, showAgent = true }: { calls: CallRow[]; showAg
           />
         </div>
 
+        {live && (
+          <span
+            title="Calls are in progress — this list is refreshing itself"
+            className="inline-flex items-center gap-1.5 h-8 px-2.5 rounded-lg border border-slate-200 dark:border-white/10 text-[11px] font-medium tabular-nums text-slate-500 dark:text-slate-400"
+          >
+            <span
+              className={cn(
+                'w-1.5 h-1.5 rounded-full',
+                pending ? 'bg-brand-500 motion-safe:animate-pulse' : 'bg-emerald-500'
+              )}
+            />
+            {freshnessLabel(lastUpdatedAt ?? mountedAt, now)}
+          </span>
+        )}
+
         {/* The search box filters what is on screen; the exports go back to the
             server, which re-applies the same role scoping the page was built
             with — so an employee still only ever gets their own calls. */}
@@ -170,6 +221,7 @@ export function CallList({ calls, showAgent = true }: { calls: CallRow[]; showAg
               <tbody className="divide-y divide-slate-100 dark:divide-white/[0.06]">
                 {filtered.map((c) => {
                   const hasContact = Boolean(c.contactId || c.contactName);
+                  const inFlight = LIVE_STATUSES.includes(c.status);
 
                   return (
                     <tr key={c.id} className="hover:bg-slate-50 dark:hover:bg-white/[0.02]">
@@ -188,6 +240,13 @@ export function CallList({ calls, showAgent = true }: { calls: CallRow[]; showAg
                             className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[11px] font-medium bg-red-100 dark:bg-red-500/10 text-red-700 dark:text-red-400"
                           >
                             <AlertTriangle className="w-3 h-3" /> not dispatched
+                          </span>
+                        ) : inFlight ? (
+                          // An outcome the AI has not reached yet is not an
+                          // outcome. Say what the call is doing instead.
+                          <span className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full text-[11px] font-medium bg-brand-100 dark:bg-brand-500/10 text-brand-700 dark:text-brand-400">
+                            <span className="w-1.5 h-1.5 rounded-full bg-brand-500 motion-safe:animate-pulse" />
+                            {c.status.replace(/_/g, ' ')}
                           </span>
                         ) : (
                           <span className={cn('px-2 py-0.5 rounded-full text-[11px] font-medium', LEAD_TONE[c.leadStatus] ?? LEAD_TONE.unknown)}>
@@ -214,7 +273,7 @@ export function CallList({ calls, showAgent = true }: { calls: CallRow[]; showAg
                               WhatsApp
                             </button>
                           )}
-                          <button onClick={() => setOpen(c)} className="h-8 px-2 text-xs font-medium text-brand-600 dark:text-brand-400 hover:underline">
+                          <button onClick={() => setOpenId(c.id)} className="h-8 px-2 text-xs font-medium text-brand-600 dark:text-brand-400 hover:underline">
                             Details
                           </button>
                         </div>
@@ -234,7 +293,7 @@ export function CallList({ calls, showAgent = true }: { calls: CallRow[]; showAg
           <motion.div
             initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
             className="fixed inset-0 z-50 bg-slate-900/40 backdrop-blur-sm"
-            onClick={() => setOpen(null)}
+            onClick={() => setOpenId(null)}
           >
             <motion.aside
               initial={{ x: '100%' }} animate={{ x: 0 }} exit={{ x: '100%' }}
@@ -247,7 +306,7 @@ export function CallList({ calls, showAgent = true }: { calls: CallRow[]; showAg
                   <h2 className="font-bold text-slate-900 dark:text-white">{open.contactName || open.phone}</h2>
                   <p className="text-xs text-slate-500">{open.phone}</p>
                 </div>
-                <button onClick={() => setOpen(null)} className="p-1.5 text-slate-400 hover:text-slate-600 rounded-lg">
+                <button onClick={() => setOpenId(null)} className="p-1.5 text-slate-400 hover:text-slate-600 rounded-lg">
                   <X className="w-4 h-4" />
                 </button>
               </div>
@@ -328,6 +387,18 @@ export function CallList({ calls, showAgent = true }: { calls: CallRow[]; showAg
                       })}
                     </div>
                   </Section>
+                )}
+
+                {/* Until the engine reports back there is genuinely nothing to
+                    read, so say the panel is waiting rather than looking empty
+                    and broken. It fills in on its own. */}
+                {LIVE_STATUSES.includes(open.status) && !open.summary && !open.transcriptText && (
+                  <div className="flex items-center gap-2.5 rounded-xl bg-slate-50 dark:bg-white/5 px-3.5 py-3">
+                    <Loader2 className="w-4 h-4 shrink-0 text-slate-400 motion-safe:animate-spin" />
+                    <p className="text-xs text-slate-500 dark:text-slate-400">
+                      Call in progress — the transcript and summary appear here as soon as it ends.
+                    </p>
+                  </div>
                 )}
               </div>
             </motion.aside>

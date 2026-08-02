@@ -11,6 +11,10 @@ import { toast } from 'sonner';
 import { ACCEPTED_TYPES, parseContactFile, type ImportResult } from '@/lib/contacts/import';
 import { ExportButton } from '@/components/export/export-button';
 import {
+  BulkCallDialog,
+  type BulkCallAgentOption,
+} from '@/components/campaigns/bulk-call-dialog';
+import {
   SendMessageDialog,
   type MessageRecipient,
   type SendMessageTarget,
@@ -174,11 +178,16 @@ async function batched(ids: string[], run: (id: string) => Promise<boolean>): Pr
 }
 
 export function ContactsManager({
-  contacts, employees, campaigns,
+  contacts, employees, campaigns, agents,
 }: {
   contacts: ContactRow[];
   employees: NamedOption[];
   campaigns: NamedOption[];
+  /**
+   * Agents the caller may dial with. Optional: when the page does not supply
+   * them they are fetched on demand, the first time a bulk run is opened.
+   */
+  agents?: BulkCallAgentOption[];
 }) {
   const router = useRouter();
   const fileRef = useRef<HTMLInputElement>(null);
@@ -194,6 +203,11 @@ export function ContactsManager({
   const [confirm, setConfirm] = useState<Confirm | null>(null);
   const [confirmBusy, setConfirmBusy] = useState(false);
   const [sendTarget, setSendTarget] = useState<SendMessageTarget | null>(null);
+
+  const [agentOptions, setAgentOptions] = useState<BulkCallAgentOption[]>(agents ?? []);
+  const [agentsLoaded, setAgentsLoaded] = useState(Boolean(agents));
+  const [agentsLoading, setAgentsLoading] = useState(false);
+  const [bulkCallOpen, setBulkCallOpen] = useState(false);
 
   const [parsing, setParsing] = useState(false);
   const [preview, setPreview] = useState<(ImportResult & { fileName: string }) | null>(null);
@@ -215,6 +229,14 @@ export function ContactsManager({
       return next.size === prev.size ? prev : next;
     });
   }, [contacts]);
+
+  // A page that supplies agents owns them; never let a fetched list shadow a
+  // fresher server-rendered one.
+  useEffect(() => {
+    if (!agents) return;
+    setAgentOptions(agents);
+    setAgentsLoaded(true);
+  }, [agents]);
 
   const counts = useMemo(() => {
     const map: Record<string, number> = {};
@@ -249,6 +271,22 @@ export function ContactsManager({
   const allShownSelected = filtered.length > 0 && filtered.every((r) => selected.has(r.id));
   const detail = detailId ? rows.find((r) => r.id === detailId) ?? null : null;
 
+  const selectedRows = useMemo(() => rows.filter((r) => selected.has(r.id)), [rows, selected]);
+
+  // What a bulk run could actually dial. A contact who asked not to be called
+  // never goes into one, and a contact already on a call has nothing to claim.
+  const dialableSelected = useMemo(
+    () => selectedRows.filter((r) => r.status !== 'do_not_call' && r.status !== 'calling'),
+    [selectedRows]
+  );
+
+  const bulkCallHint =
+    dialableSelected.length > 0
+      ? 'Queue these contacts as a bulk calling run'
+      : selectedRows.every((r) => r.status === 'do_not_call')
+        ? 'Every selected contact is marked do-not-call'
+        : 'Every selected contact is already on a call or marked do-not-call';
+
   function patchRow(id: string, changes: Partial<ContactRow>) {
     setRows((rs) => rs.map((r) => (r.id === id ? { ...r, ...changes } : r)));
   }
@@ -278,6 +316,38 @@ export function ContactsManager({
     const chosen = rows.filter((r) => selected.has(r.id));
     if (chosen.length === 0) return;
     setSendTarget({ recipients: chosen.map(toRecipient) });
+  }
+
+  /**
+   * Open the bulk-call dialog, fetching the agent list first if the page did
+   * not supply one. Fetched here rather than on mount because most visits to
+   * this screen never start a bulk run.
+   */
+  async function openBulkCall() {
+    if (dialableSelected.length === 0 || agentsLoading) return;
+
+    if (!agentsLoaded) {
+      setAgentsLoading(true);
+      try {
+        const data = await request('/api/agents', 'GET');
+        const list: any[] = Array.isArray(data) ? data : [];
+        setAgentOptions(
+          list.map((a) => ({
+            id: String(a?.id ?? ''),
+            name: String(a?.name ?? 'Untitled agent'),
+            isActive: a?.isActive === true,
+          }))
+        );
+        setAgentsLoaded(true);
+      } catch (e) {
+        toast.error(reason(e));
+        return;
+      } finally {
+        setAgentsLoading(false);
+      }
+    }
+
+    setBulkCallOpen(true);
   }
 
   /** One click: select every warm lead and open the composer over them. */
@@ -731,10 +801,33 @@ export function ContactsManager({
                 {selectedIds.length} selected
               </span>
 
+              {/* Calling is the headline action on this screen, so it takes the
+                  primary button and WhatsApp steps back to the outline style. */}
+              <button
+                onClick={openBulkCall}
+                disabled={bulkBusy || agentsLoading || dialableSelected.length === 0}
+                title={bulkCallHint}
+                className="inline-flex items-center gap-1.5 h-9 px-3.5 rounded-xl bg-brand-600 hover:bg-brand-500 disabled:opacity-50 disabled:cursor-not-allowed text-white text-sm font-semibold transition-colors"
+              >
+                {agentsLoading ? <Loader2 className="w-4 h-4 animate-spin" /> : <PhoneCall className="w-4 h-4" />}
+                Call selected
+                {dialableSelected.length > 0 && dialableSelected.length !== selectedIds.length && (
+                  <span className="tabular-nums opacity-70">{dialableSelected.length}</span>
+                )}
+              </button>
+
+              {/* A disabled button's tooltip is unreliable, and "why is this
+                  greyed out?" is exactly the question here — so say it inline. */}
+              {dialableSelected.length === 0 && (
+                <span className="max-w-[15rem] px-1 text-[11px] leading-snug text-amber-700 dark:text-amber-400">
+                  {bulkCallHint}
+                </span>
+              )}
+
               <button
                 onClick={messageSelected}
                 disabled={bulkBusy}
-                className="inline-flex items-center gap-1.5 h-9 px-3.5 rounded-xl bg-brand-600 hover:bg-brand-500 disabled:opacity-50 text-white text-sm font-semibold transition-colors"
+                className="inline-flex items-center gap-1.5 h-9 px-3.5 rounded-xl border border-slate-200 dark:border-white/10 text-sm font-medium text-slate-700 dark:text-slate-200 hover:bg-slate-50 dark:hover:bg-white/5 disabled:opacity-50 transition-colors"
               >
                 <MessageCircle className="w-4 h-4" /> Send WhatsApp
               </button>
@@ -1130,6 +1223,22 @@ export function ContactsManager({
           </motion.div>
         )}
       </AnimatePresence>
+
+      {/* The dialog is handed the whole selection, do-not-call rows included,
+          so it can show what will be left out rather than quietly shrinking
+          the count the user just chose. */}
+      <BulkCallDialog
+        open={bulkCallOpen}
+        contacts={selectedRows.map((r) => ({
+          id: r.id,
+          name: r.name,
+          phone: r.phone,
+          status: r.status,
+        }))}
+        agents={agentOptions}
+        onClose={() => setBulkCallOpen(false)}
+        onQueued={() => setSelected(new Set())}
+      />
 
       <SendMessageDialog
         target={sendTarget}

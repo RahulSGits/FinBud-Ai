@@ -47,9 +47,13 @@ export default async function AdminOverview() {
 
   const today = { startedAt: { gte: startOfDay } };
 
+  // Every figure below is read fresh on each request: the page is
+  // force-dynamic, and the live rail's own polling ends in router.refresh(),
+  // which re-runs exactly this function. Nothing here may be cached or hoisted
+  // out, or the "live" numbers would freeze at whatever the first render saw.
   const [
     agentCount, activeAgents, contactCount, runningCampaigns,
-    callsToday, answeredToday, interestedToday, liveCalls, recentCalls, avgAgg,
+    callsToday, answeredToday, interestedToday, liveCalls, liveCallCount, recentCalls, avgAgg,
     // Today's calls split by the two halves of the attribution rule: dials that
     // carry an operator, and campaign dials that do not and therefore belong to
     // whoever owns the lead. Grouped, so this stays four queries at any volume.
@@ -68,6 +72,9 @@ export default async function AdminOverview() {
       take: 12,
       include: { contact: { select: { name: true } }, agent: { select: { name: true } } },
     }),
+    // Counted separately because the rail above is capped at 12 rows: on a busy
+    // campaign its length would under-report what is actually on the phones.
+    db.call.count({ where: { status: { in: IN_FLIGHT } } }),
     db.call.findMany({
       where: { status: CallStatus.completed },
       orderBy: { startedAt: 'desc' },
@@ -184,7 +191,11 @@ export default async function AdminOverview() {
       />
 
       <div className="px-6 pb-10 space-y-6">
+        {/* The panel polls itself while a call is in flight; nothing else on
+            this page may poll, or one dashboard would fan out into several
+            overlapping refreshes of the same queries. */}
         <LiveCallsPanel
+          liveCount={liveCallCount}
           initialCalls={liveCalls.map((c) => ({
             id: c.id,
             phone: c.phone,

@@ -116,6 +116,17 @@ export type VoiceEvent =
   | { kind: 'end'; callId: string; report: CallReport }
   | { kind: 'ignored'; callId?: string };
 
+/**
+ * What an engine says became of one call when we ask it directly.
+ *
+ * `report` is present only once the call has actually ended; a call that is
+ * still up reports its status and nothing else.
+ */
+export interface FetchedCallResult {
+  status: CallStatus;
+  report?: CallReport;
+}
+
 export interface CallReport {
   durationSec: number;
   endedReason?: string | null;
@@ -164,6 +175,26 @@ export interface VoiceProvider {
 
   /** Pure function: raw provider payload -> normalised event. */
   parseWebhook(payload: any): VoiceEvent;
+
+  /**
+   * Ask the engine what became of a call, by its provider-side id.
+   *
+   * Optional on purpose, and the reason it exists at all: an engine that runs
+   * calls on its own servers tells us the outcome by webhook, and a webhook is
+   * one delivery attempt to a URL we do not control the routing of. Never
+   * configured, deployment URL moved, one POST dropped — and the transcript is
+   * lost to us while the vendor still holds it. Polling recovers it.
+   *
+   * Engines that push their own results (LiveKit's worker, the simulator) have
+   * nothing to poll and simply omit this, so callers must feature-detect.
+   *
+   * The contract, which callers depend on to decide what to write:
+   *   - call has ended         -> { status, report }
+   *   - call is still up       -> { status }, no report
+   *   - id the engine does not know -> null, so the row is left alone
+   *   - transport failure      -> throws, so the caller can retry next pass
+   */
+  fetchCallResult?(providerCallId: string): Promise<FetchedCallResult | null>;
 }
 
 export interface ProviderCapabilities {

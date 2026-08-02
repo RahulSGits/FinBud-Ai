@@ -87,4 +87,9 @@ export class LiveKitProvider implements VoiceProvider {
     if (!callId) return { kind: 'ignored' };
     return { kind: 'status', callId, status: normaliseStatus(payload.status) };
   }
+
+  // `fetchCallResult` is deliberately not implemented. Reconciliation exists to
+  // recover a result held on a vendor's servers that never reached us; here the
+  // worker is ours and pushes the report itself, and LiveKit keeps no
+  // transcript or summary to ask for. A poll would find nothing to recover.
 }
