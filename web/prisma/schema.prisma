@@ -157,6 +157,18 @@ model Agent {
   transferEnabled Boolean @default(false)
   transferNumber  String?
 
+  /// Hard ceiling on one call, in seconds, enforced by the voice engine.
+  ///
+  /// Telephony and model time are billed per minute, so a call that fails to
+  /// end — a hold queue, an answering machine, a customer who puts the phone
+  /// down without hanging up — burns credit until someone notices. Five minutes
+  /// is longer than any qualification call needs.
+  maxCallSeconds Int @default(300)
+
+  /// Seconds of silence before the agent prompts, then gives up and ends the
+  /// call. Without this a dead line stays open for the full maxCallSeconds.
+  idleTimeoutSeconds Int @default(10)
+
   /// When true the worker retrieves knowledge-base context during calls.
   useKnowledgeBase Boolean @default(false)
 

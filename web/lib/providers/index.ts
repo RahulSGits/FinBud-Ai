@@ -93,6 +93,8 @@ export function agentToConfig(agent: any): AgentConfig {
     language: agent.language,
     transferEnabled: agent.transferEnabled,
     transferNumber: agent.transferNumber,
+    maxCallSeconds: agent.maxCallSeconds,
+    idleTimeoutSeconds: agent.idleTimeoutSeconds,
     webhookUrl: webhookUrlFor(agent.voiceProvider || defaultProviderId()),
   };
 }

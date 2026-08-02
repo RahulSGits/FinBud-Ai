@@ -148,7 +148,26 @@ export class OmniDimensionProvider implements VoiceProvider {
           'End the call when the customer says goodbye, asks to be removed, or the conversation is clearly finished.',
         message: 'Thank you for your time. Have a good day.',
       },
+      user_idle: {
+        threshold_sec: config.idleTimeoutSeconds ?? 10,
+        last_message: 'I will let you go for now. Have a good day.',
+      },
     };
+
+    // Deliberately NOT sending a maximum call duration.
+    //
+    // Tested against a live account: `call_ending.max_duration_sec` and
+    // `max_call_duration_in_sec` are both ignored on create — send 240 or 300
+    // and the agent still reads back 600 — as is user_idle.threshold_sec, which
+    // stays at 10 whatever is sent. OmniDimension enforces its own ten-minute
+    // ceiling and exposes no hangup endpoint, so neither this adapter nor the
+    // app can cut a live call short.
+    //
+    // What does work is `end_call` above: the agent hangs up on its own when
+    // the conversation is finished, which is what ends the overwhelming
+    // majority of calls long before any ceiling. Agent.maxCallSeconds is still
+    // honoured by engines that accept it, and the campaign runner's stale-call
+    // reaper releases the concurrency slot regardless.
 
     const voice = OmniDimensionProvider.voice(config.voiceId);
     if (voice) body.voice = voice;

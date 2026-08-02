@@ -5,7 +5,7 @@ import { useEffect, useMemo, useState } from 'react';
 import { AnimatePresence, motion } from 'motion/react';
 import {
   Sparkles, Loader2, Wand2, Save, AlertCircle, Bot, Trash2, PhoneForwarded,
-  BookOpen, CheckCircle2, CloudOff, X, Check, Lock,
+  BookOpen, CheckCircle2, CloudOff, X, Check, Lock, Timer,
 } from 'lucide-react';
 import { toast } from 'sonner';
 import { cn } from '@/lib/utils';
@@ -32,6 +32,8 @@ interface AgentDraft {
   voiceId: string;
   language: string;
   transferEnabled: boolean;
+  maxCallSeconds: number;
+  idleTimeoutSeconds: number;
   transferNumber: string;
   useKnowledgeBase: boolean;
   isActive: boolean;
@@ -80,6 +82,7 @@ const EMPTY: AgentDraft = {
   llmModel: 'openai/gpt-4o-mini', sttModel: 'deepgram/nova-3',
   ttsModel: 'cartesia/sonic-3', voiceId: '', language: 'multi',
   transferEnabled: false, transferNumber: '', useKnowledgeBase: false, isActive: false,
+  maxCallSeconds: 300, idleTimeoutSeconds: 10,
 };
 
 const DRAFT_KEYS = Object.keys(EMPTY) as (keyof AgentDraft)[];
@@ -578,6 +581,53 @@ export function AgentBuilder({
             className={inputClass}
           />
         </Field>
+      </section>
+
+      {/* Spend guards */}
+      <section className="rounded-2xl border border-slate-200 dark:border-white/10 bg-white dark:bg-white/[0.03] p-5 space-y-4">
+        <div className="flex items-center gap-2">
+          <Timer className="w-4 h-4 text-slate-500" />
+          <h2 className="text-sm font-semibold text-slate-900 dark:text-white">Call limits</h2>
+        </div>
+        <p className="text-xs text-slate-500 dark:text-slate-400 -mt-2">
+          Telephony and model time bill by the minute, so a call that never ends — a hold queue, an
+          answering machine, a handset put down without hanging up — keeps burning credit. What
+          actually stops most calls is the agent hanging up once the conversation is finished, which
+          is always on.
+        </p>
+        <p className="text-xs text-amber-700 dark:text-amber-400/90 -mt-1">
+          OmniDimension enforces its own ten-minute ceiling and ignores a shorter one, so these
+          limits apply only to engines that accept them.
+        </p>
+        <div className="grid sm:grid-cols-2 gap-4">
+          <Field label="Maximum call length">
+            <select
+              value={draft.maxCallSeconds}
+              disabled={readOnly}
+              onChange={(e) => set('maxCallSeconds', Number(e.target.value))}
+              className={inputClass}
+            >
+              <option value={120}>2 minutes</option>
+              <option value={180}>3 minutes</option>
+              <option value={300}>5 minutes (recommended)</option>
+              <option value={600}>10 minutes</option>
+              <option value={900}>15 minutes</option>
+            </select>
+          </Field>
+          <Field label="Hang up after silence">
+            <select
+              value={draft.idleTimeoutSeconds}
+              disabled={readOnly}
+              onChange={(e) => set('idleTimeoutSeconds', Number(e.target.value))}
+              className={inputClass}
+            >
+              <option value={5}>5 seconds</option>
+              <option value={10}>10 seconds (recommended)</option>
+              <option value={15}>15 seconds</option>
+              <option value={30}>30 seconds</option>
+            </select>
+          </Field>
+        </div>
       </section>
 
       {/* Knowledge base */}

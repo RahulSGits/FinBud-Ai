@@ -1,0 +1,3 @@
+-- AlterTable
+ALTER TABLE "Agent" ADD COLUMN     "maxCallSeconds" INTEGER NOT NULL DEFAULT 300,
+ADD COLUMN     "idleTimeoutSeconds" INTEGER NOT NULL DEFAULT 10;

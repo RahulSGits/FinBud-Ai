@@ -56,6 +56,11 @@ export interface AgentConfig {
   transferEnabled?: boolean | null;
   transferNumber?: string | null;
 
+  /** Hard ceiling on one call, in seconds. Guards against runaway spend. */
+  maxCallSeconds?: number | null;
+  /** Silence before the agent prompts and then hangs up, in seconds. */
+  idleTimeoutSeconds?: number | null;
+
   /** Absolute URL the provider should POST call events to. */
   webhookUrl?: string | null;
 }

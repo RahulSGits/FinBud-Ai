@@ -69,6 +69,8 @@ export default async function EmployeeAgentPage({ params }: { params: { id: stri
             language: agent.language,
             transferEnabled: agent.transferEnabled,
             transferNumber: agent.transferNumber ?? '',
+            maxCallSeconds: agent.maxCallSeconds,
+            idleTimeoutSeconds: agent.idleTimeoutSeconds,
             useKnowledgeBase: agent.useKnowledgeBase,
             isActive: agent.isActive,
             syncedAt: agent.syncedAt ? agent.syncedAt.toISOString() : null,

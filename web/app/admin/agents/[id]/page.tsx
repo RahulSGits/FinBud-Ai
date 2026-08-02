@@ -59,6 +59,8 @@ export default async function AgentPage({ params }: { params: { id: string } }) 
             language: agent.language,
             transferEnabled: agent.transferEnabled,
             transferNumber: agent.transferNumber ?? '',
+            maxCallSeconds: agent.maxCallSeconds,
+            idleTimeoutSeconds: agent.idleTimeoutSeconds,
             useKnowledgeBase: agent.useKnowledgeBase,
             isActive: agent.isActive,
             syncedAt: agent.syncedAt ? agent.syncedAt.toISOString() : null,

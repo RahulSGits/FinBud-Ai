@@ -18,6 +18,16 @@ function pick(body: any) {
   if (body.transferEnabled !== undefined) out.transferEnabled = !!body.transferEnabled;
   if (body.transferNumber !== undefined) out.transferNumber = body.transferNumber || null;
   if (body.useKnowledgeBase !== undefined) out.useKnowledgeBase = !!body.useKnowledgeBase;
+
+  // Clamped, not merely coerced: these are the only thing standing between a
+  // stuck call and an unbounded bill, so a client sending 0 or 86400 must not
+  // be able to disable the ceiling.
+  if (body.maxCallSeconds !== undefined) {
+    out.maxCallSeconds = Math.max(30, Math.min(Number(body.maxCallSeconds) || 300, 3600));
+  }
+  if (body.idleTimeoutSeconds !== undefined) {
+    out.idleTimeoutSeconds = Math.max(3, Math.min(Number(body.idleTimeoutSeconds) || 10, 120));
+  }
   return out;
 }
 

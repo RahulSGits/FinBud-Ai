@@ -21,9 +21,19 @@ const DIALABLE: ContactStatus[] = [ContactStatus.pending, ContactStatus.retry];
  *
  * A crashed worker or a dropped webhook leaves a call "ringing" forever, and
  * because in-flight calls consume concurrency slots that permanently stalls the
- * campaign. Generous enough not to kill genuinely long conversations.
+ * campaign.
+ *
+ * Twelve minutes, set by the engine rather than by preference: OmniDimension
+ * enforces a ten-minute ceiling of its own and ignores any duration we send, so
+ * reaping sooner would mark genuinely live conversations as abandoned and
+ * release their contact to be dialled a second time. Twelve leaves room for the
+ * result to arrive after the engine hangs up.
+ *
+ * This only frees the concurrency slot; it cannot end a live call, because
+ * OmniDimension exposes no hangup endpoint. The agent's own end-call condition
+ * is what actually stops the meter.
  */
-const STALE_CALL_MS = 15 * 60_000;
+const STALE_CALL_MS = 12 * 60_000;
 
 /**
  * Fail calls that have been in flight too long and release their contacts.
