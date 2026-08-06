@@ -158,11 +158,38 @@ export class OmniDimensionProvider implements VoiceProvider {
           extracted_variables: OmniDimensionProvider.EXTRACTED_VARIABLES,
         },
       },
+      // Hang up as soon as the agent has said its closing line.
+      //
+      // The previous condition ended on "the conversation is clearly
+      // finished", which is a judgement the model kept declining to make. On a
+      // real call it said "Have a good day!", then re-opened with another
+      // pitch, said goodbye again, and waited — the customer hung up 40
+      // seconds later and every one of those seconds was billed. Worse, a
+      // customer who simply puts the phone down never hangs up at all, so the
+      // call runs to the provider's ten-minute ceiling.
+      //
+      // Delivering a closing line is an observable event rather than a
+      // judgement, so that is what this fires on. The listed cases are the ones
+      // that reliably follow a completed script: an agreed callback, a decline,
+      // an opt-out, or a customer who has said goodbye.
       end_call: {
         enabled: true,
-        condition:
-          'End the call when the customer says goodbye, asks to be removed, or the conversation is clearly finished.',
+        condition: [
+          'End the call IMMEDIATELY, without waiting for a reply, as soon as any of these is true:',
+          '- You have said a closing or farewell line of any kind (for example "have a good day", "thank you for your time", "take care").',
+          '- The customer has agreed to a callback and you have confirmed it back to them.',
+          '- The customer has said they are not interested, and you have acknowledged it once.',
+          '- The customer has asked to be removed, and you have confirmed it.',
+          '- The customer has said goodbye, or has stopped responding.',
+          'Never start a new topic, re-pitch, or ask another question after you have said a closing line. Once you have closed, the call is over.',
+        ].join('\n'),
         message: 'Thank you for your time. Have a good day.',
+        // A generated line so a Hindi-speaking customer is not signed off in
+        // English; the condition above is what makes it decisive, not this.
+        message_type: 'prompt',
+        message_prompt:
+          'Say one short farewell in the language the customer has been speaking, then stop. ' +
+          'Do not ask a question, do not add new information, and do not invite further conversation.',
       },
       user_idle: {
         threshold_sec: config.idleTimeoutSeconds ?? 10,

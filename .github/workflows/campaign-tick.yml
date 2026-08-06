@@ -21,6 +21,16 @@ on:
 
 permissions: {}
 
+# Scheduled runs are best-effort: GitHub sometimes cannot allocate a hosted
+# runner and the job sits queued until it is cancelled ("The job was not
+# acquired by Runner of type hosted"). Without this, each stalled run stays
+# queued while the next one is scheduled behind it, and a backlog builds that
+# makes the starvation worse. Dropping an old tick costs nothing — the endpoint
+# is idempotent and the next run picks up exactly the same work.
+concurrency:
+  group: campaign-tick
+  cancel-in-progress: true
+
 jobs:
   tick:
     runs-on: ubuntu-latest
@@ -32,7 +42,14 @@ jobs:
           CRON_SECRET: ${{ secrets.CRON_SECRET }}
         run: |
           if [ -z "$APP_URL" ] || [ -z "$CRON_SECRET" ]; then
-            echo "APP_URL / CRON_SECRET secrets not configured; skipping."
+            # A warning, not a silent exit 0.
+            #
+            # This used to print a line and pass, so the workflow showed a green
+            # tick every five minutes while dialling nothing and reconciling
+            # nothing. A cron that is doing no work must not look identical to
+            # one that is: an annotation puts it on the run summary and on the
+            # Actions tab, where somebody will actually see it.
+            echo "::warning title=Campaign tick did nothing::APP_URL / CRON_SECRET are not set in this repository's Actions secrets, so campaigns are not being advanced and call results are not being reconciled. See the setup notes at the top of .github/workflows/campaign-tick.yml"
             exit 0
           fi
           code=$(curl -sS -o /tmp/tick.json -w '%{http_code}' --max-time 280 \
@@ -54,7 +71,7 @@ jobs:
           CRON_SECRET: ${{ secrets.CRON_SECRET }}
         run: |
           if [ -z "$APP_URL" ] || [ -z "$CRON_SECRET" ]; then
-            echo "APP_URL / CRON_SECRET secrets not configured; skipping."
+            echo "::warning title=Call sync did nothing::APP_URL / CRON_SECRET are not set, so finished calls are not having their transcript and recording pulled in."
             exit 0
           fi
           # Pulls results for calls still marked in-flight straight from the
