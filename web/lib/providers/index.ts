@@ -61,12 +61,28 @@ export async function listProviders(): Promise<
     : out;
 }
 
-/** Absolute webhook URL a provider should call back on. */
+/**
+ * Absolute webhook URL a provider should call back on.
+ *
+ * Carries a shared token when one is configured. Voice engines here sign
+ * nothing — OmniDimension posts a bare JSON body — so the only thing that can
+ * distinguish a real callback from anyone on the internet is a secret we chose
+ * and handed to the provider when registering the agent. Without it the
+ * endpoint is an unauthenticated writer of call outcomes.
+ *
+ * Reuses FINBUD_INTERNAL_SECRET rather than inventing another variable: it
+ * already exists for exactly this kind of server-to-server trust, and one fewer
+ * secret to rotate is one fewer that gets missed.
+ */
 export function webhookUrlFor(providerId: string): string | null {
   const base =
     process.env.NEXT_PUBLIC_APP_URL ||
     (process.env.VERCEL_URL ? `https://${process.env.VERCEL_URL}` : null);
-  return base ? `${base.replace(/\/$/, '')}/api/webhooks/${providerId}` : null;
+  if (!base) return null;
+
+  const url = `${base.replace(/\/$/, '')}/api/webhooks/${providerId}`;
+  const secret = process.env.FINBUD_INTERNAL_SECRET;
+  return secret ? `${url}?token=${encodeURIComponent(secret)}` : url;
 }
 
 /** Shape a Prisma Agent row into a provider-neutral config. */

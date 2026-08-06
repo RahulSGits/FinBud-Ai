@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { ContactStatus, Role } from '@prisma/client';
 import { db } from '@/lib/db';
 import { AuthError, requireUser } from '@/lib/auth';
+import { isAdmin, visibleContacts } from '@/lib/authz';
 import { normalisePhone } from '@/lib/contacts/phone';
 
 export async function GET(req: NextRequest) {
@@ -50,7 +51,7 @@ export async function POST(req: NextRequest) {
   const rows = Array.isArray(body.contacts) ? body.contacts : [];
   if (!rows.length) return NextResponse.json({ error: 'No contacts provided' }, { status: 400 });
 
-  let created = 0, updated = 0;
+  let created = 0, updated = 0, skippedNotYours = 0, skippedDoNotCall = 0;
   const invalid: string[] = [];
 
   for (const row of rows.slice(0, 5000)) {
@@ -60,24 +61,60 @@ export async function POST(req: NextRequest) {
       continue;
     }
 
+    // `undefined`, not `null`, for anything the sheet did not supply.
+    //
+    // Prisma writes an explicit null but skips undefined, so a phone-only
+    // re-import used to blank the name, email, company and loan details of
+    // rows a rep had spent weeks enriching — and the response called it
+    // "updated". campaignId and customFields on this same object were already
+    // guarded this way; the other five were not.
     const data = {
-      name: row.name ? String(row.name).slice(0, 160) : null,
-      email: row.email ? String(row.email).slice(0, 200) : null,
-      company: row.company ? String(row.company).slice(0, 160) : null,
-      loanType: row.loanType ? String(row.loanType).slice(0, 80) : null,
-      loanAmount: row.loanAmount != null && row.loanAmount !== '' ? Number(row.loanAmount) || null : null,
+      name: row.name ? String(row.name).slice(0, 160) : undefined,
+      email: row.email ? String(row.email).slice(0, 200) : undefined,
+      company: row.company ? String(row.company).slice(0, 160) : undefined,
+      loanType: row.loanType ? String(row.loanType).slice(0, 80) : undefined,
+      loanAmount:
+        row.loanAmount != null && row.loanAmount !== ''
+          ? Number(row.loanAmount) || undefined
+          : undefined,
       campaignId: body.campaignId || undefined,
-      assignedToId: body.assignedToId || undefined,
       customFields: row.customFields ?? undefined,
     };
 
     // Upsert on phone: re-importing a sheet updates rather than duplicating.
-    const existing = await db.contact.findUnique({ where: { phone } });
+    const existing = await db.contact.findUnique({
+      where: { phone },
+      select: { id: true, assignedToId: true, status: true },
+    });
+
     if (existing) {
+      // Phone is globally unique, so importing a sheet containing someone
+      // else's lead would otherwise silently take it over — assignment and all.
+      // An employee may only update leads already theirs; an admin may update
+      // any. Either way the import never changes who a lead belongs to.
+      if (!isAdmin(user) && existing.assignedToId !== user.id) {
+        skippedNotYours++;
+        continue;
+      }
+      // A contact who asked not to be called must not be quietly revived by
+      // re-importing the sheet they were removed from.
+      if (existing.status === ContactStatus.do_not_call) {
+        skippedDoNotCall++;
+        continue;
+      }
       await db.contact.update({ where: { phone }, data });
       updated++;
     } else {
-      await db.contact.create({ data: { ...data, phone, status: ContactStatus.pending } });
+      await db.contact.create({
+        data: {
+          ...data,
+          phone,
+          status: ContactStatus.pending,
+          // Admins may hand an import to someone; an employee's import is
+          // always their own, never assignable to a colleague.
+          assignedToId: isAdmin(user) ? body.assignedToId || null : user.id,
+        },
+      });
       created++;
     }
   }
@@ -85,7 +122,7 @@ export async function POST(req: NextRequest) {
   await db.auditLog.create({
     data: {
       action: 'contacts.imported', entity: 'Contact', userId: user.id,
-      meta: { created, updated, invalid: invalid.length },
+      meta: { created, updated, invalid: invalid.length, skippedNotYours, skippedDoNotCall },
     },
   });
 
@@ -94,32 +131,95 @@ export async function POST(req: NextRequest) {
     skipped: invalid.length,
     // Surfaced so a bad column mapping is visible instead of silently dropping rows.
     invalidSamples: invalid.slice(0, 5),
+    // Rows deliberately left alone. Reported separately from invalid ones so
+    // "nothing happened to 40 of my rows" has an answer rather than a mystery.
+    skippedNotYours,
+    skippedDoNotCall,
   }, { status: 201 });
 }
 
 export async function PATCH(req: NextRequest) {
-  try { await requireUser(); } catch (e) {
+  let user;
+  try { user = await requireUser(); } catch (e) {
     const err = e as AuthError; return NextResponse.json({ error: err.message }, { status: err.status ?? 500 });
   }
   const body = await req.json().catch(() => ({}));
-  if (!body.id) return NextResponse.json({ error: 'id is required' }, { status: 400 });
+  const id = typeof body.id === 'string' ? body.id : '';
+  if (!id) return NextResponse.json({ error: 'id is required' }, { status: 400 });
+
+  // Scoped read before the write. Without this an employee could edit any lead
+  // in the company by id — reassign it to themselves, or flip a do_not_call
+  // contact back to pending, which is the guard lib/calls/place.ts relies on to
+  // refuse dialling someone who asked us to stop.
+  const existing = await db.contact.findFirst({
+    where: { AND: [{ id }, visibleContacts(user)] },
+    select: { id: true, status: true },
+  });
+  // 404 rather than 403: telling a stranger that a lead exists but is not
+  // theirs is itself a disclosure.
+  if (!existing) return NextResponse.json({ error: 'Contact not found' }, { status: 404 });
 
   const data: any = {};
-  for (const f of ['name', 'email', 'company', 'loanType', 'status', 'assignedToId', 'campaignId']) {
+  for (const f of ['name', 'email', 'company', 'loanType', 'status', 'campaignId']) {
     if (body[f] !== undefined) data[f] = body[f] || null;
   }
   if (body.loanAmount !== undefined) data.loanAmount = Number(body.loanAmount) || null;
   if (body.tags !== undefined) data.tags = Array.isArray(body.tags) ? body.tags : [];
 
-  return NextResponse.json(await db.contact.update({ where: { id: body.id }, data }));
+  // Reassignment is an admin act. An employee moving a lead onto themselves —
+  // or off themselves onto a colleague — rewrites someone else's pipeline, so
+  // it is silently ignored rather than honoured.
+  if (body.assignedToId !== undefined && isAdmin(user)) {
+    data.assignedToId = body.assignedToId || null;
+  }
+
+  // Lifting do_not_call means overriding a person's explicit request to stop
+  // being contacted. Only an admin may do that, and it is recorded.
+  if (
+    existing.status === ContactStatus.do_not_call &&
+    data.status &&
+    data.status !== ContactStatus.do_not_call
+  ) {
+    if (!isAdmin(user)) {
+      return NextResponse.json(
+        { error: 'Only an admin can take a contact off the do-not-call list.' },
+        { status: 403 }
+      );
+    }
+    await db.auditLog.create({
+      data: {
+        action: 'contact.do_not_call_lifted',
+        entity: 'Contact',
+        entityId: id,
+        userId: user.id,
+        meta: { to: data.status },
+      },
+    }).catch(() => undefined);
+  }
+
+  return NextResponse.json(await db.contact.update({ where: { id }, data }));
 }
 
 export async function DELETE(req: NextRequest) {
-  try { await requireUser(); } catch (e) {
+  let user;
+  try { user = await requireUser(); } catch (e) {
     const err = e as AuthError; return NextResponse.json({ error: err.message }, { status: err.status ?? 500 });
   }
   const id = req.nextUrl.searchParams.get('id');
   if (!id) return NextResponse.json({ error: 'id is required' }, { status: 400 });
+
+  // Deleting cascades to the contact's Notes and orphans its Calls, so the
+  // ownership check matters more here than anywhere else in this file.
+  const existing = await db.contact.findFirst({
+    where: { AND: [{ id }, visibleContacts(user)] },
+    select: { id: true },
+  });
+  if (!existing) return NextResponse.json({ error: 'Contact not found' }, { status: 404 });
+
   await db.contact.delete({ where: { id } });
+  await db.auditLog.create({
+    data: { action: 'contact.deleted', entity: 'Contact', entityId: id, userId: user.id },
+  }).catch(() => undefined);
+
   return NextResponse.json({ ok: true });
 }
