@@ -8,6 +8,7 @@ import {
 } from 'lucide-react';
 import { toast } from 'sonner';
 import { cn } from '@/lib/utils';
+import { UsageCard } from '@/components/settings/usage-card';
 
 export interface BusinessHoursSetting {
   tz: string;
@@ -434,6 +435,11 @@ export function SettingsManager({ settings, providers, mockMode, integrations }:
             })}
           </ul>
         )}
+
+        {/* Directly under the engines, because "what will this cost" is the
+            next question after "which engine". Loads on its own so a slow or
+            unreachable provider cannot hold up the settings page. */}
+        <UsageCard />
       </section>
 
       {/* 3 — Integrations */}

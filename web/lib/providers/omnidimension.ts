@@ -20,7 +20,8 @@
 // the boundary.
 import {
   AgentConfig, CallReport, CallStatus, FetchedCallResult, LanguageOption, ModelOption,
-  PhoneNumberOption, ProviderCapabilities, ProviderError, StartCallParams, StartCallResult,
+  PhoneNumberOption, ProviderCapabilities, ProviderError, ProviderUsageReport,
+  StartCallParams, StartCallResult,
   VoiceEvent, VoiceOption, VoiceProvider, buildSystemPrompt, normaliseStatus,
 } from './types';
 
@@ -140,6 +141,21 @@ export class OmniDimensionProvider implements VoiceProvider {
         webhook: {
           enabled: true,
           include: ['summary', 'fullConversation', 'sentiment', 'extracted_variables'],
+          // Ask the engine to label the outcome.
+          //
+          // Without this the list is empty and OmniDimension extracts nothing,
+          // so every call came back with lead_status absent — which this app
+          // then stored as "unknown". The dashboard's outcome column, the
+          // interest rate, and whether a contact is ever dialled again all read
+          // from these fields, so an empty list quietly disabled every one of
+          // them. Nothing else fills the gap: the model that ran the call is
+          // the only thing that heard it.
+          //
+          // The keys are exactly the ones toReport() reads out of
+          // extracted_variables, and the prompts are written to force a choice
+          // rather than invite prose — a free-text answer here is worse than
+          // none, because it looks like data.
+          extracted_variables: OmniDimensionProvider.EXTRACTED_VARIABLES,
         },
       },
       end_call: {
@@ -606,6 +622,68 @@ export class OmniDimensionProvider implements VoiceProvider {
     return out;
   }
 
+  /**
+   * What the engine should pull out of the conversation after every call.
+   *
+   * Each `key` matches a field toReport() already looks for, so adding one here
+   * is all it takes for that field to start arriving. Each `prompt` names the
+   * allowed answers explicitly and says what to do when the call gives no
+   * evidence — an outcome guessed from a call that never connected is worse
+   * than an empty one, because it reads as fact downstream.
+   */
+  private static readonly EXTRACTED_VARIABLES = [
+    {
+      key: 'lead_status',
+      prompt:
+        'Classify the outcome using exactly one of: interested, not_interested, ' +
+        'callback_requested, no_answer, voicemail. Use callback_requested when the ' +
+        'customer agreed to a call back from an expert. Use interested only when they ' +
+        'asked to proceed or wanted details. If the customer never spoke, answer no_answer.',
+    },
+    {
+      key: 'interested',
+      prompt:
+        'Answer true only if the customer expressed genuine interest in the product ' +
+        'or agreed to be contacted again. Politeness is not interest — a warm "no thank ' +
+        'you" is false. Otherwise answer false.',
+    },
+    {
+      key: 'customer_intent',
+      prompt:
+        'In one short sentence, what did the customer actually want? If they wanted ' +
+        'nothing, answer "none".',
+    },
+    {
+      key: 'next_action',
+      prompt:
+        'The single next step that was agreed, in a few words (for example "expert ' +
+        'callback in 10 minutes"). If nothing was agreed, answer "none".',
+    },
+    {
+      key: 'objections',
+      prompt:
+        'Any concerns the customer raised, as a short comma-separated list (for ' +
+        'example "rate too high, already has a loan"). If none, answer "none".',
+    },
+  ];
+
+  /**
+   * Drop the ways a model says "nothing" so they never read as findings.
+   *
+   * Extraction prompts have to offer an explicit escape hatch, or the model
+   * fills the silence with something plausible. The cost is that the escape
+   * hatch comes back as a value like "none", which is data-shaped and would sit
+   * in the UI as though the call had produced it.
+   */
+  private static some(value: string | null | undefined): string | null {
+    if (!value) return null;
+    const v = value.trim();
+    if (!v) return null;
+    return /^(none|n\/?a|null|unknown|nothing|not applicable|no objections?)\.?$/i.test(v)
+      ? null
+      : v;
+  }
+
   /** Resolve a provider-relative URL against OmniDimension's own host. */
   private static absolute(url: string | null | undefined): string | null {
     if (!url) return null;
@@ -642,6 +720,28 @@ export class OmniDimensionProvider implements VoiceProvider {
       : Number(pick(payload, ['duration', 'duration_seconds', 'callDuration']) ?? 0);
     const score = Number(pick(payload, ['lead_score']) ?? pick(vars, ['lead_score', 'score']) ?? NaN);
 
+    const some = OmniDimensionProvider.some;
+
+    const leadStatus = some(
+      text(pick(payload, ['lead_status'])) ?? text(pick(vars, ['lead_status', 'leadStatus']))
+    );
+
+    // `interested` drives the interest rate on the client dashboard, so what
+    // counts as evidence for it matters.
+    //
+    // It used to include `sentiment === 'positive'`. Sentiment measures TONE,
+    // not intent: a customer who listens politely and says "no thank you"
+    // scores Positive, and was being counted as a lead. On a call where the
+    // vendor labels nothing else — the common case — sentiment was the only
+    // clause that could fire, so the metric was close to "how polite were
+    // they". Only an explicit signal counts now: the agent qualified them, or
+    // the outcome itself says interested or callback_requested.
+    const explicitlyInterested =
+      qualified === true ||
+      String(qualified).toLowerCase() === 'true' ||
+      leadStatus === 'interested' ||
+      leadStatus === 'callback_requested';
+
     return {
       durationSec: Number.isFinite(duration) ? Math.max(0, Math.round(duration)) : 0,
       // Who hung up and why is the most useful thing on the record when a call
@@ -667,20 +767,24 @@ export class OmniDimensionProvider implements VoiceProvider {
         // with a narrative of what was actually said, which is the closest
         // thing to one and far better than showing nothing.
         text(pick(payload, ['sentiment_analysis_details'])),
-      // A string "true" counts: extracted variables come back as text.
-      interested:
-        (sentiment ?? '').toLowerCase() === 'positive' ||
-        qualified === true ||
-        String(qualified).toLowerCase() === 'true',
-      leadStatus: text(pick(payload, ['lead_status'])) ?? text(pick(vars, ['lead_status', 'leadStatus'])),
+      interested: explicitlyInterested,
+      leadStatus,
       leadScore: Number.isFinite(score) ? Math.round(score) : null,
       sentiment,
-      customerIntent:
+      // The extraction prompts ask for "none" when there is nothing to report,
+      // because a model given no way to say "nothing" will invent something.
+      // That sentinel must not reach the UI, where it would sit in the intent
+      // column looking like a finding.
+      customerIntent: some(
         text(pick(payload, ['intent', 'customer_intent'])) ??
-        text(pick(vars, ['intent', 'customer_intent'])),
-      nextAction:
-        text(pick(payload, ['next_action'])) ?? text(pick(vars, ['next_action', 'nextAction'])),
-      objections: text(pick(payload, ['objections'])) ?? text(pick(vars, ['objections'])),
+          text(pick(vars, ['intent', 'customer_intent']))
+      ),
+      nextAction: some(
+        text(pick(payload, ['next_action'])) ?? text(pick(vars, ['next_action', 'nextAction']))
+      ),
+      objections: some(
+        text(pick(payload, ['objections'])) ?? text(pick(vars, ['objections']))
+      ),
     };
   }
 
@@ -836,6 +940,60 @@ export class OmniDimensionProvider implements VoiceProvider {
     }
 
     return { status, report };
+  }
+
+  /**
+   * Per-call spend, read from the call log.
+   *
+   * There is no balance endpoint on this API for a normal account — /reseller
+   * is the only place credits appear and it answers 403 — so cost has to be
+   * summed from the calls themselves. Each row carries `call_cost` alongside
+   * its voice-AI and telephony components, which is enough to measure the real
+   * per-minute rate rather than assume the list price.
+   *
+   * Bounded to the recent pages: this backs a settings panel, not an
+   * accounting ledger, and walking the full history on every page load would
+   * cost a request per hundred calls.
+   */
+  async fetchUsage(): Promise<ProviderUsageReport> {
+    const calls: ProviderUsageReport['calls'] = [];
+    let talkSeconds = 0;
+    let spend = 0;
+
+    for (let page = 1; page <= 5; page++) {
+      const data = await this.request(`calls/logs?page=${page}&page_size=100`, { method: 'GET' });
+      const rows: any[] = Array.isArray(data?.call_log_data) ? data.call_log_data : [];
+      if (!rows.length) break;
+
+      for (const row of rows) {
+        const seconds =
+          (Number(row?.call_duration_in_minutes) || 0) * 60 +
+          (Number(row?.call_duration_in_seconds) || 0);
+        const cost = Number(row?.call_cost) || 0;
+        talkSeconds += seconds;
+        spend += cost;
+        calls.push({ at: OmniDimensionProvider.callTime(row?.time_of_call), cost, seconds });
+      }
+
+      if (rows.length < 100) break;
+    }
+
+    return { talkSeconds, spend, calls };
+  }
+
+  /**
+   * Parse OmniDimension's "DD/MM/YYYY HH:MM:SS" call timestamp.
+   *
+   * Date.parse reads that as US month-first, so 08/06 becomes August 6th
+   * instead of June 8th — a two-month error that would silently misattribute
+   * spend to the wrong side of a top-up.
+   */
+  private static callTime(value: any): number | null {
+    const m = String(value ?? '').match(/^(\d{2})\/(\d{2})\/(\d{4})\s+(\d{2}):(\d{2}):(\d{2})$/);
+    if (!m) return null;
+    const [, dd, mm, yyyy, hh, mi, ss] = m;
+    const t = Date.UTC(+yyyy, +mm - 1, +dd, +hh, +mi, +ss);
+    return Number.isFinite(t) ? t : null;
   }
 
   parseWebhook(payload: any): VoiceEvent {

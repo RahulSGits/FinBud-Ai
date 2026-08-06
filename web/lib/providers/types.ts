@@ -207,6 +207,23 @@ export interface VoiceProvider {
    *   - transport failure      -> throws, so the caller can retry next pass
    */
   fetchCallResult?(providerCallId: string): Promise<FetchedCallResult | null>;
+
+  /**
+   * What calling has cost so far, for engines that report per-call spend.
+   *
+   * Optional because most engines do not. Returns measurements only — no
+   * balance, because no engine here exposes one to an ordinary API key.
+   */
+  fetchUsage?(): Promise<ProviderUsageReport>;
+}
+
+export interface ProviderUsageReport {
+  /** Total connected seconds across the calls inspected. */
+  talkSeconds: number;
+  /** Total spend across those calls. */
+  spend: number;
+  /** Per-call cost and timestamp, so spend can be counted from a given date. */
+  calls: { at: number | null; cost: number; seconds: number }[];
 }
 
 export interface ProviderCapabilities {
