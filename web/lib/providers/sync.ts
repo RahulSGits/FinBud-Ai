@@ -41,7 +41,25 @@ export async function syncAgent(agentId: string): Promise<SyncResult> {
     let externalAgentId = agent.externalAgentId;
 
     if (externalAgentId) {
-      await provider.updateAgent(externalAgentId, config);
+      try {
+        await provider.updateAgent(externalAgentId, config);
+      } catch (err: any) {
+        // A stored id the provider no longer recognises. The usual cause is a
+        // rotated API key: ids are scoped to the account that issued them, so
+        // every agent synced under the previous key becomes a 404 the moment
+        // the key changes — and, without this, dialling fails permanently with
+        // "agent not found" while the agent looks perfectly healthy locally.
+        // Re-create it under the current credentials instead.
+        // Matched on the response body, not err.status: adapters map upstream
+        // codes onto HTTP codes of their own (OmniDimension's 404 arrives as a
+        // 502), so the original status is only reliably present in the text.
+        const text = `${err?.message ?? ''} ${err?.detail ?? ''}`;
+        const orphaned = /\(404\)|not[ _]?found|access denied|does not exist/i.test(text);
+        if (!orphaned) throw err;
+
+        console.warn(`[sync] ${agent.name}: external id ${externalAgentId} is unknown to ${provider.name}; re-creating.`);
+        externalAgentId = (await provider.createAgent(config)).externalAgentId;
+      }
     } else {
       externalAgentId = (await provider.createAgent(config)).externalAgentId;
     }
