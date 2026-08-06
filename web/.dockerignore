@@ -1,0 +1,21 @@
+# The builder stage does `COPY . .`, so anything not excluded here is baked
+# into an image layer — and layers survive even if a later stage deletes the
+# file. Secrets first, for that reason.
+.env
+.env.*
+!.env.example
+
+node_modules
+.next
+out
+build
+
+.git
+.github
+.vscode
+
+npm-debug.log*
+*.tsbuildinfo
+
+# Local Postgres data directory, if anyone ever runs it inside the tree.
+.finbud-pg

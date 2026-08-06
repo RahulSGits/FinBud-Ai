@@ -7,7 +7,9 @@ import {
 export async function POST(req: NextRequest) {
   let user;
   try {
-    user = await requireUser();
+    // The one route that must work while a change is outstanding — it is the
+    // way out of that state.
+    user = await requireUser({ allowPendingPasswordChange: true });
   } catch (e) {
     const err = e as AuthError;
     return NextResponse.json({ error: err.message }, { status: err.status ?? 500 });

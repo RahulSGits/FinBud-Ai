@@ -124,9 +124,47 @@ export async function reconcileInFlightCalls(
 
     // Bound to the provider so the narrowing survives the awaits below.
     const fetchResult = provider.fetchCallResult?.bind(provider);
+
     // LiveKit's worker pushes its own report and the simulator writes results
-    // directly, so neither can be polled. Nothing to do for those rows.
-    if (!fetchResult) continue;
+    // directly, so neither can be polled — there is nothing to ask.
+    //
+    // But "cannot be polled" is not the same as "needs no supervision". If that
+    // push never arrives — the worker crashed, or was never running — the row
+    // stays in flight forever and holds its contact at `calling`, where nothing
+    // in the codebase can move it and no further call to that person is
+    // possible. Skipping the row entirely is what made that permanent. Age it
+    // out on the same clock as any other call the engine cannot account for.
+    if (!fetchResult) {
+      if (Date.now() - call.startedAt.getTime() < ORPHAN_AFTER_MS) continue;
+
+      await db.call.update({
+        where: { id: call.id },
+        data: {
+          status: 'failed',
+          endedAt: new Date(),
+          failureReason:
+            `Not dispatched: ${provider.name} reports results by pushing them, and none arrived. ` +
+            'The call was abandoned as stale.',
+        },
+      });
+      if (call.contactId) {
+        await db.contact.updateMany({
+          where: { id: call.contactId, status: 'calling' },
+          data: { status: 'retry', nextAttemptAt: new Date() },
+        });
+      }
+
+      results.push({
+        callId: call.id,
+        providerCallId,
+        provider: provider.id,
+        from: call.status,
+        to: 'failed',
+        changed: true,
+      });
+      updated++;
+      continue;
+    }
 
     const outcome: ReconcileOutcome = {
       callId: call.id,

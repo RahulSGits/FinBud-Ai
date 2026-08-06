@@ -39,7 +39,12 @@ const STALE_CALL_MS = 12 * 60_000;
  * Fail calls that have been in flight too long and release their contacts.
  * Runs at the start of every tick so a campaign can always recover itself.
  */
-async function reapStaleCalls(campaignId: string): Promise<number> {
+async function reapStaleCalls(campaign: {
+  id: string;
+  retryLimit: number;
+  retryDelayMins: number;
+}): Promise<number> {
+  const campaignId = campaign.id;
   const cutoff = new Date(Date.now() - STALE_CALL_MS);
 
   const stale = await db.call.findMany({
@@ -57,12 +62,40 @@ async function reapStaleCalls(campaignId: string): Promise<number> {
     },
   });
 
-  // Release the contacts so they can be retried rather than stuck at "calling".
+  // Release the contacts, honouring the same retry policy as a failed dial.
+  //
+  // This used to send every reaped contact straight back to `retry` with
+  // nextAttemptAt = now, consulting neither retryLimit nor retryDelayMins. With
+  // a scheduler ticking every few minutes that is an unbounded redial loop: the
+  // same real person is called again roughly every STALE_CALL_MS, for as long
+  // as the campaign runs, and no setting anywhere stops it. It is the one path
+  // in this file that can spend money without a human doing anything, so it now
+  // uses exactly the ceiling the dial-failure path at the bottom of this file
+  // already applies.
   const contactIds = stale.map((c) => c.contactId).filter((id): id is string => !!id);
   if (contactIds.length) {
+    const delayMs = Math.max(1, campaign.retryDelayMins) * 60_000;
+
+    // Out of attempts: stop, rather than retrying forever.
     await db.contact.updateMany({
-      where: { id: { in: contactIds }, status: ContactStatus.calling },
-      data: { status: ContactStatus.retry, nextAttemptAt: new Date() },
+      where: {
+        id: { in: contactIds },
+        status: ContactStatus.calling,
+        attempts: { gte: campaign.retryLimit },
+      },
+      data: { status: ContactStatus.exhausted, nextAttemptAt: null },
+    });
+
+    // Still has attempts left: wait the configured delay, not zero. Retrying
+    // immediately would also mean redialling someone whose call may only just
+    // have ended.
+    await db.contact.updateMany({
+      where: {
+        id: { in: contactIds },
+        status: ContactStatus.calling,
+        attempts: { lt: campaign.retryLimit },
+      },
+      data: { status: ContactStatus.retry, nextAttemptAt: new Date(Date.now() + delayMs) },
     });
   }
 
@@ -108,7 +141,7 @@ export async function tickCampaign(campaignId: string): Promise<TickResult> {
 
   // Recover abandoned calls before measuring capacity, otherwise a stuck call
   // holds a concurrency slot forever and the campaign never finishes.
-  await reapStaleCalls(campaignId);
+  await reapStaleCalls(campaign);
 
   const hours = parseBusinessHours(campaign.businessHours);
   if (!isWithinBusinessHours(hours)) {
@@ -146,6 +179,12 @@ export async function tickCampaign(campaignId: string): Promise<TickResult> {
       campaignId,
       status: { in: DIALABLE },
       OR: [{ nextAttemptAt: null }, { nextAttemptAt: { lte: now } }],
+      // A hard ceiling on attempts, independent of how a contact came to be
+      // dialable. Every path that sets `retry` is supposed to check the limit
+      // first, but this is the query that actually spends money, so it does not
+      // rely on all of them having remembered — one that forgets costs real
+      // calls to a real person.
+      attempts: { lt: Math.max(1, campaign.retryLimit + 1) },
     },
     orderBy: [{ nextAttemptAt: 'asc' }, { createdAt: 'asc' }],
     take: slots,
@@ -179,16 +218,33 @@ export async function tickCampaign(campaignId: string): Promise<TickResult> {
     });
     if (claim.count === 0) continue;
 
-    const call = await db.call.create({
-      data: {
-        phone: contact.phone,
-        direction: 'outbound',
-        status: CallStatus.initiated,
-        contactId: contact.id,
-        campaignId,
-        agentId: campaign.agentId,
-      },
-    });
+    // From here the contact is held at `calling`, and only a Call row makes
+    // that recoverable — both the reaper and the reconciler search by call, not
+    // by contact. If this insert fails (a pool timeout is the realistic case)
+    // the contact is stranded with nothing to find it, and only a manual edit
+    // brings it back. So a failure here releases the claim rather than leaving
+    // it held.
+    let call;
+    try {
+      call = await db.call.create({
+        data: {
+          phone: contact.phone,
+          direction: 'outbound',
+          status: CallStatus.initiated,
+          contactId: contact.id,
+          campaignId,
+          agentId: campaign.agentId,
+        },
+      });
+    } catch (err) {
+      console.error(`[campaign ${campaignId}] could not record a call for ${contact.id}:`, err);
+      await db.contact.updateMany({
+        where: { id: contact.id, status: ContactStatus.calling },
+        data: { status: ContactStatus.retry, nextAttemptAt: new Date(Date.now() + 60_000) },
+      }).catch(() => undefined);
+      failed++;
+      continue;
+    }
 
     try {
       // Resolve the engine from the agent, and dial ONLY through the provider

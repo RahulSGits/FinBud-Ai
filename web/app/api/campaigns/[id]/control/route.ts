@@ -79,6 +79,30 @@ export async function POST(req: NextRequest, { params }: { params: { id: string 
     );
   }
 
+  // Publish the agent before the first contact is claimed.
+  //
+  // Engines with a server-side agent cannot dial one they have never been told
+  // about, and starting a campaign was the only dial path that did not check —
+  // the bulk route and the manual dial both sync first. An unpublished agent
+  // therefore failed every single dial, burning an attempt per contact and
+  // retiring the whole list to `exhausted` while the UI reported that dialling
+  // had begun. Reachable without mock mode ever being used: rotating the
+  // provider API key clears externalAgentId on every agent.
+  if (!isMockMode() && provider.capabilities().serverAgents && !campaign.agent.externalAgentId) {
+    const { syncAgent } = await import('@/lib/providers/sync');
+    const sync = await syncAgent(campaign.agent.id);
+    if (!sync.synced || !sync.externalAgentId) {
+      return NextResponse.json(
+        {
+          error:
+            `"${campaign.agent.name}" could not be published to ${provider.name}, so no call would connect. ` +
+            (sync.error ?? 'The sync failed.'),
+        },
+        { status: 502 }
+      );
+    }
+  }
+
   const total = await db.contact.count({ where: { campaignId: campaign.id } });
   await db.campaign.update({
     where: { id: campaign.id },

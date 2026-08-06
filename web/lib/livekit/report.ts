@@ -34,7 +34,8 @@ function toLeadStatus(raw: unknown): LeadStatus {
 export async function applyCallReport(report: CallReport): Promise<void> {
   const call = await db.call.findUnique({
     where: { id: report.callId },
-    select: { id: true, contactId: true, campaignId: true, status: true },
+    // startedAt orders this call against any newer one to the same contact.
+    select: { id: true, contactId: true, campaignId: true, status: true, startedAt: true },
   });
 
   // A report for a deleted call must not throw — the worker would retry forever.
@@ -50,6 +51,13 @@ export async function applyCallReport(report: CallReport): Promise<void> {
     data: {
       status: CallStatus.completed,
       endedAt: new Date(),
+      // A result arrived, so whatever we assumed while waiting for it is no
+      // longer true. Without this a call reaped as stale keeps "No result
+      // received — the call was abandoned as stale", and the call list swaps
+      // the outcome badge for a red "not dispatched" chip whenever
+      // failureReason is set — so a completed, interested call reads as a
+      // failure for as long as anyone looks at it.
+      failureReason: null,
       durationSec: Math.max(0, Math.round(report.durationSec || 0)),
       transcript: report.transcript ?? undefined,
       transcriptText: report.transcriptText ?? null,
@@ -67,7 +75,10 @@ export async function applyCallReport(report: CallReport): Promise<void> {
   if (call.contactId) {
     // Whether anyone actually spoke decides what an unlabelled outcome means.
     const connected = (report.durationSec ?? 0) > 0 || !!report.transcriptText;
-    await advanceContact(call.contactId, call.campaignId, leadStatus, connected);
+    await advanceContact(call.contactId, call.campaignId, leadStatus, connected, {
+      id: call.id,
+      startedAt: call.startedAt,
+    });
   }
 
   if (call.campaignId) {
@@ -84,10 +95,34 @@ async function advanceContact(
   campaignId: string | null,
   leadStatus: LeadStatus,
   /** True when the call actually connected — someone spoke, or time elapsed. */
-  connected: boolean
+  connected: boolean,
+  /** The call this report is for, so a late one cannot overrule a newer call. */
+  reportingCall: { id: string; startedAt: Date }
 ): Promise<void> {
   const contact = await db.contact.findUnique({ where: { id: contactId } });
   if (!contact) return;
+
+  // A report can arrive after the contact has already been dialled again —
+  // a webhook retried, or a reconcile pass catching up on a call that was
+  // reaped and released. Every other conditional write in this subsystem is
+  // guarded; this one was the outlier, and the damaging direction is a stale
+  // report setting the contact back to `retry` while a call to them is live,
+  // which the next tick turns into a second simultaneous call to a real person.
+  const newerInFlight = await db.call.findFirst({
+    where: {
+      contactId,
+      id: { not: reportingCall.id },
+      startedAt: { gt: reportingCall.startedAt },
+      status: { in: [CallStatus.initiated, CallStatus.ringing, CallStatus.in_progress] },
+    },
+    select: { id: true },
+  });
+  if (newerInFlight) {
+    console.warn(
+      `[report] ignoring outcome for call ${reportingCall.id}: contact ${contactId} has a newer call in flight.`
+    );
+    return;
+  }
 
   if (leadStatus === LeadStatus.not_interested) {
     // `completed`, not `do_not_call`. Declining an overdraft today is a closed

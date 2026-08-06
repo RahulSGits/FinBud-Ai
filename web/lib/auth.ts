@@ -162,9 +162,30 @@ export class AuthError extends Error {
   }
 }
 
-export async function requireUser(): Promise<SessionUser> {
+/**
+ * The signed-in user, refusing anyone who still owes a password change.
+ *
+ * That change was enforced only by the dashboard and admin layouts, which run
+ * on page navigation, so the entire API sat behind nothing. An account still on
+ * the default password — committed in this repo, and the same one every
+ * admin-created user starts with — could place calls that spend real provider
+ * credit, and read every lead in the company, without ever loading a page.
+ *
+ * Enforced here because this is the single function every protected route
+ * handler already calls. Middleware cannot do it: its matcher covers pages, not
+ * /api. The one route that must stay reachable asks for the exemption
+ * explicitly, so a new route cannot inherit it by accident.
+ */
+export async function requireUser(
+  opts: { allowPendingPasswordChange?: boolean } = {}
+): Promise<SessionUser> {
   const user = await getCurrentUser();
   if (!user) throw new AuthError('Unauthorized', 401);
+
+  if (user.mustChangePassword && !opts.allowPendingPasswordChange) {
+    throw new AuthError('Set a new password before using the app.', 403);
+  }
+
   return user;
 }
 
