@@ -26,6 +26,8 @@ interface AgentDraft {
   objectionHandling: string;
   complianceRules: string;
   closingScript: string;
+  /** Which calling engine runs this agent. '' means the platform default. */
+  voiceProvider: string;
   llmModel: string;
   sttModel: string;
   ttsModel: string;
@@ -68,6 +70,13 @@ interface ModelOption {
   kind: 'llm' | 'stt' | 'tts';
 }
 
+/** A calling engine, and whether its credentials are actually present. */
+interface ProviderOption {
+  id: string;
+  name: string;
+  configured: boolean;
+}
+
 interface VoiceOption {
   id: string;
   name: string;
@@ -79,6 +88,9 @@ const EMPTY: AgentDraft = {
   name: '', description: '', firstMessage: '', systemPrompt: '', businessContext: '',
   callObjective: '', qualificationRules: '', objectionHandling: '', complianceRules: '',
   closingScript: '',
+  // Blank on purpose: a new agent follows the platform default until someone
+  // deliberately pins it to one engine.
+  voiceProvider: '',
   llmModel: 'openai/gpt-4o-mini', sttModel: 'deepgram/nova-3',
   ttsModel: 'cartesia/sonic-3', voiceId: '', language: 'multi',
   transferEnabled: false, transferNumber: '', useKnowledgeBase: false, isActive: false,
@@ -158,6 +170,8 @@ export function AgentBuilder({
   const [models, setModels] = useState<ModelOption[]>([]);
   const [voices, setVoices] = useState<VoiceOption[]>([]);
   const [catalogueError, setCatalogueError] = useState<string | null>(null);
+  const [providers, setProviders] = useState<ProviderOption[]>([]);
+  const [defaultProvider, setDefaultProvider] = useState<string>('');
 
   const [confirming, setConfirming] = useState(false);
   const [deleting, setDeleting] = useState(false);
@@ -176,11 +190,32 @@ export function AgentBuilder({
     let cancelled = false;
 
     async function load() {
-      const [modelRes, voiceRes] = await Promise.allSettled([
+      const [modelRes, voiceRes, providerRes] = await Promise.allSettled([
         fetch('/api/providers/models').then((r) => r.json()),
         fetch('/api/providers/voices').then((r) => r.json()),
+        fetch('/api/providers').then((r) => r.json()),
       ]);
       if (cancelled) return;
+
+      // Engine list is independent of the model catalogue: the catalogue can
+      // fail (bad key, provider down) while the choice of engine still matters,
+      // so a failure here must not take the picker away.
+      if (providerRes.status === 'fulfilled' && Array.isArray(providerRes.value?.providers)) {
+        const list = providerRes.value.providers as ProviderOption[];
+        const fallback = String(providerRes.value.default ?? '');
+        setProviders(list);
+        setDefaultProvider(fallback);
+
+        // A brand-new agent starts blank so the platform default can fill it in
+        // here, once we actually know what it is. Guarded on blank: an existing
+        // agent's engine must never be rewritten by loading the page, or simply
+        // opening someone's agent would mark the form dirty and offer to move
+        // it to a different engine.
+        if (fallback) {
+          setDraft((d) => (d.voiceProvider ? d : { ...d, voiceProvider: fallback }));
+          setSaved((s) => (s.voiceProvider ? s : { ...s, voiceProvider: fallback }));
+        }
+      }
 
       let problem: string | null = null;
 
@@ -520,6 +555,41 @@ export function AgentBuilder({
         <p className="text-xs text-slate-500 dark:text-slate-400 -mt-2">
           Loaded from the configured voice provider — no separate provider keys needed.
         </p>
+
+        {/* Which engine actually dials. Previously every agent silently
+            inherited the platform default, which made a two-engine setup
+            impossible to steer from the dashboard. */}
+        <Field label="Calling engine">
+          <select
+            value={draft.voiceProvider}
+            onChange={(e) => set('voiceProvider', e.target.value)}
+            disabled={readOnly}
+            className={inputClass}
+          >
+            {/* Keeps an unrecognised stored value visible rather than silently
+                showing the first option and saving a change nobody made. */}
+            {draft.voiceProvider && !providers.some((p) => p.id === draft.voiceProvider) && (
+              <option value={draft.voiceProvider}>{draft.voiceProvider}</option>
+            )}
+            {providers.map((p) => (
+              <option key={p.id} value={p.id}>
+                {p.name}
+                {p.configured ? '' : ' — needs credentials'}
+                {p.id === defaultProvider ? ' (default)' : ''}
+              </option>
+            ))}
+          </select>
+          <p className="mt-1.5 text-xs text-slate-500 dark:text-slate-400">
+            {(() => {
+              const match = providers.find((p) => p.id === draft.voiceProvider);
+              if (match && !match.configured) {
+                return `${match.name} has no credentials yet. Add them in Settings, or this agent will not be able to place calls.`;
+              }
+              return 'The service that dials the number and runs the conversation.';
+            })()}
+          </p>
+        </Field>
+
         <div className="grid sm:grid-cols-2 gap-4">
           <Field label="Language model">
             <select value={draft.llmModel} onChange={(e) => set('llmModel', e.target.value)} disabled={readOnly} className={inputClass}>

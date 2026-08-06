@@ -52,6 +52,7 @@ export default async function AgentPage({ params }: { params: { id: string } }) 
             objectionHandling: agent.objectionHandling ?? '',
             complianceRules: agent.complianceRules ?? '',
             closingScript: agent.closingScript ?? '',
+            voiceProvider: agent.voiceProvider,
             llmModel: agent.llmModel,
             sttModel: agent.sttModel,
             ttsModel: agent.ttsModel,

@@ -62,6 +62,7 @@ export default async function EmployeeAgentPage({ params }: { params: { id: stri
             objectionHandling: agent.objectionHandling ?? '',
             complianceRules: agent.complianceRules ?? '',
             closingScript: agent.closingScript ?? '',
+            voiceProvider: agent.voiceProvider,
             llmModel: agent.llmModel,
             sttModel: agent.sttModel,
             ttsModel: agent.ttsModel,

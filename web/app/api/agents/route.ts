@@ -2,7 +2,11 @@ import { NextRequest, NextResponse } from 'next/server';
 import { db } from '@/lib/db';
 import { AuthError, requireUser } from '@/lib/auth';
 import { assertOwner, errorResponse, visibleAgents } from '@/lib/authz';
+import { defaultProviderId } from '@/lib/providers';
 import { syncAgent, unsyncAgent } from '@/lib/providers/sync';
+
+/** Adapters the registry can actually resolve. */
+const KNOWN_PROVIDERS = ['omnidimension', 'livekit', 'mock'];
 
 const FIELDS = [
   'name', 'description', 'firstMessage', 'systemPrompt', 'businessContext',
@@ -14,6 +18,15 @@ const FIELDS = [
 function pick(body: any) {
   const out: Record<string, any> = {};
   for (const f of FIELDS) if (body[f] !== undefined) out[f] = body[f];
+
+  // The engine has to name a real adapter. A blank or unknown value would be
+  // stored happily by Prisma (it is just a String) and then resolve to the
+  // platform default at dial time, so the agent would run somewhere other than
+  // its own settings page claims. Fall back explicitly instead of silently.
+  if (out.voiceProvider !== undefined) {
+    const id = String(out.voiceProvider || '').toLowerCase();
+    out.voiceProvider = KNOWN_PROVIDERS.includes(id) ? id : defaultProviderId();
+  }
   if (body.isActive !== undefined) out.isActive = !!body.isActive;
   if (body.transferEnabled !== undefined) out.transferEnabled = !!body.transferEnabled;
   if (body.transferNumber !== undefined) out.transferNumber = body.transferNumber || null;
