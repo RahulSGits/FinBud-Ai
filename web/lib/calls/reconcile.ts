@@ -103,6 +103,7 @@ export async function reconcileInFlightCalls(
       // the contact they are holding when that happens.
       startedAt: true,
       contactId: true,
+      fromNumber: true,
       agent: { select: { voiceProvider: true } },
     },
   });
@@ -183,6 +184,16 @@ export async function reconcileInFlightCalls(
 
       const next = result.status as CallStatus;
       outcome.to = next;
+
+      // Fill in the line the customer saw, if dispatch never told us. Only
+      // ever fills a blank: what the dispatch reported at the time beats what
+      // the log says afterwards.
+      if (result.report?.fromNumber && !call.fromNumber) {
+        await db.call.update({
+          where: { id: call.id },
+          data: { fromNumber: result.report.fromNumber },
+        });
+      }
 
       if (result.report) {
         // applyCallReport is the ONE place a finished call is persisted: it

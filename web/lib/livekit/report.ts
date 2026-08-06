@@ -65,7 +65,9 @@ export async function applyCallReport(report: CallReport): Promise<void> {
   });
 
   if (call.contactId) {
-    await advanceContact(call.contactId, call.campaignId, leadStatus);
+    // Whether anyone actually spoke decides what an unlabelled outcome means.
+    const connected = (report.durationSec ?? 0) > 0 || !!report.transcriptText;
+    await advanceContact(call.contactId, call.campaignId, leadStatus, connected);
   }
 
   if (call.campaignId) {
@@ -80,20 +82,41 @@ export async function applyCallReport(report: CallReport): Promise<void> {
 async function advanceContact(
   contactId: string,
   campaignId: string | null,
-  leadStatus: LeadStatus
+  leadStatus: LeadStatus,
+  /** True when the call actually connected — someone spoke, or time elapsed. */
+  connected: boolean
 ): Promise<void> {
   const contact = await db.contact.findUnique({ where: { id: contactId } });
   if (!contact) return;
 
   if (leadStatus === LeadStatus.not_interested) {
+    // `completed`, not `do_not_call`. Declining an overdraft today is a closed
+    // opportunity; do_not_call is a consent state that means "this person asked
+    // us to stop contacting them". Conflating them was costly in both
+    // directions: it is irreversible from the UI, and it also gates WhatsApp
+    // (lib/messaging/send.ts), so one soft "not right now" permanently severed
+    // every future channel to that customer. An explicit opt-out still reaches
+    // do_not_call — it just has to actually be an opt-out.
     await db.contact.update({
       where: { id: contactId },
-      data: { status: ContactStatus.do_not_call, nextAttemptAt: null },
+      data: { status: ContactStatus.completed, nextAttemptAt: null },
     });
     return;
   }
 
-  const retryable = leadStatus === LeadStatus.no_answer || leadStatus === LeadStatus.voicemail;
+  // `unknown` means the engine told us nothing about the outcome, which is most
+  // often just the provider declining to label the call rather than anything
+  // about the lead. Treating it as terminal retired contacts that had never
+  // actually been spoken to.
+  //
+  // But it only becomes a retry when nobody answered. If the call connected,
+  // the conversation happened and is sitting in the transcript for a human to
+  // read; redialling someone who has just spoken to us would be worse than
+  // leaving the row closed.
+  const retryable =
+    leadStatus === LeadStatus.no_answer ||
+    leadStatus === LeadStatus.voicemail ||
+    (leadStatus === LeadStatus.unknown && !connected);
 
   if (!retryable) {
     await db.contact.update({

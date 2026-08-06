@@ -228,7 +228,7 @@ export class OmniDimensionProvider implements VoiceProvider {
       body: JSON.stringify({
         agent_id: agentId,
         to_number: to,
-        call_context: params.metadata, // round-tripped back on the webhook
+        call_context: OmniDimensionProvider.callContext(params.metadata),
         // null is a valid value: it asks the account to use its default line.
         from_number_id: from ? Number(from.id) : null,
       }),
@@ -457,10 +457,54 @@ export class OmniDimensionProvider implements VoiceProvider {
     turns: { role: string; text: string }[] | null;
     text: string | null;
   } {
+    // Best source by far: the call log carries a structured turn list, so the
+    // transcript can be rebuilt without parsing prose. Each entry pairs what the
+    // customer said with the agent's reply, in that order.
+    const interactions = payload?.interactions;
+    if (Array.isArray(interactions) && interactions.length) {
+      const ordered = [...interactions].sort(
+        (a, b) => Number(a?.interaction_sequence ?? 0) - Number(b?.interaction_sequence ?? 0)
+      );
+      const turns: { role: string; text: string }[] = [];
+      for (const it of ordered) {
+        const asked = String(it?.user_query ?? '').trim();
+        const said = String(it?.bot_response ?? '').trim();
+        if (asked) turns.push({ role: 'user', text: asked });
+        if (said) turns.push({ role: 'assistant', text: said });
+      }
+      if (turns.length) return { turns, text: OmniDimensionProvider.render(turns) };
+    }
+
     let raw: any = OmniDimensionProvider.pick(payload, [
+      // `call_conversation` is what the REST log actually uses; the camelCase
+      // spellings below are the webhook's. Omitting this one meant every
+      // reconciled call arrived with an empty transcript.
+      'call_conversation',
       'fullConversation', 'full_conversation', 'conversation', 'transcript',
     ]);
     if (!raw) return { turns: null, text: null };
+
+    // The log renders the conversation as one HTML-ish string:
+    //   "LLM: Hi there.<br/>User: Who is this?<br/>"
+    // Split it back into turns rather than storing markup the UI would have to
+    // render as text.
+    if (typeof raw === 'string' && /<br\s*\/?>/i.test(raw)) {
+      const turns = raw
+        .split(/<br\s*\/?>/i)
+        .map((line) => line.trim())
+        .filter(Boolean)
+        .map((line) => {
+          const m = line.match(/^(LLM|Bot|Agent|Assistant|User|Customer|Human)\s*:\s*(.*)$/is);
+          if (!m) return { role: 'assistant', text: line };
+          const who = m[1].toLowerCase();
+          return {
+            role: /user|customer|human/.test(who) ? 'user' : 'assistant',
+            text: m[2].trim(),
+          };
+        })
+        .filter((t) => t.text);
+      if (turns.length) return { turns, text: OmniDimensionProvider.render(turns) };
+    }
 
     if (typeof raw === 'string') {
       const trimmed = raw.trim();
@@ -500,13 +544,73 @@ export class OmniDimensionProvider implements VoiceProvider {
         .filter((t): t is { role: string; text: string } => t !== null);
 
       if (!turns.length) return { turns: null, text: null };
-      return {
-        turns,
-        text: turns.map((t) => `${t.role === 'user' ? 'Customer' : 'Agent'}: ${t.text}`).join('\n'),
-      };
+      return { turns, text: OmniDimensionProvider.render(turns) };
     }
 
     return { turns: null, text: null };
+  }
+
+  /** One readable transcript line per turn, for search and for download. */
+  private static render(turns: { role: string; text: string }[]): string {
+    return turns.map((t) => `${t.role === 'user' ? 'Customer' : 'Agent'}: ${t.text}`).join('\n');
+  }
+
+  /**
+   * Who ended the call, and why, in one line.
+   *
+   * "End call tool invoked" alone does not say whether the agent decided the
+   * conversation was finished or the customer rang off, and that difference is
+   * the whole story when reviewing a short call.
+   */
+  private static hangup(payload: any): string | null {
+    const reason = OmniDimensionProvider.text(payload?.hangup_reason);
+    const source = OmniDimensionProvider.text(payload?.hangup_source);
+    if (!reason && !source) return null;
+    const who = source === 'bot' ? 'Agent' : source === 'user' ? 'Customer' : null;
+    if (reason && who) return `${reason} (${who.toLowerCase()} hung up)`;
+    return reason ?? `${who} hung up`;
+  }
+
+  /**
+   * The context sent with a dispatch, and echoed back on every webhook.
+   *
+   * Two spellings have to be right here or the call is visibly wrong:
+   *
+   * `customer_name` — OmniDimension substitutes `{{customer_name}}` in the
+   * opening line from these keys. Our callers hold it as `customerName`, so
+   * without the snake_case alias the customer literally hears "Hi
+   * {{customer_name}}, Priya here" as the first words of the call.
+   *
+   * `callId` — parseWebhook looks for `ctx.callId` to match an event back to
+   * our Call row, but callers put it in as `callLogId`, so every inbound event
+   * was being discarded as unrecognised.
+   *
+   * Both aliases are added rather than renamed, so anything already reading the
+   * original keys keeps working.
+   */
+  private static callContext(metadata: any): Record<string, any> {
+    const meta = (metadata && typeof metadata === 'object' ? metadata : {}) as Record<string, any>;
+    const out: Record<string, any> = { ...meta };
+
+    // "there" rather than blank, so a nameless lead is greeted with "Hi there,
+    // this is Priya…" instead of "Hi , this is Priya…". Plenty of imported rows
+    // carry only a phone number, and the alternative is an audible stumble in
+    // the first second of every one of those calls. This is a greeting fallback
+    // only — nothing writes it back to the contact.
+    const name = OmniDimensionProvider.text(meta.customerName ?? meta.customer_name);
+    out.customer_name = name ?? 'there';
+
+    const callId = meta.callLogId ?? meta.callId;
+    if (callId != null) out.callId = String(callId);
+
+    return out;
+  }
+
+  /** Resolve a provider-relative URL against OmniDimension's own host. */
+  private static absolute(url: string | null | undefined): string | null {
+    if (!url) return null;
+    if (/^https?:\/\//i.test(url)) return url;
+    return `https://omnidim.io${url.startsWith('/') ? '' : '/'}${url}`;
   }
 
   /**
@@ -519,27 +623,50 @@ export class OmniDimensionProvider implements VoiceProvider {
     const vars = OmniDimensionProvider.extracted(payload);
     const conversation = OmniDimensionProvider.conversation(payload);
 
-    const sentiment = text(pick(payload, ['sentiment', 'call_sentiment']) ?? pick(vars, ['sentiment']));
+    const sentiment = text(
+      pick(payload, ['sentiment', 'call_sentiment', 'sentiment_score']) ?? pick(vars, ['sentiment'])
+    );
     const qualified =
       pick(payload, ['lead_qualified', 'is_qualified']) ??
       pick(vars, ['lead_qualified', 'is_qualified', 'interested']);
 
-    const duration = Number(
-      pick(payload, ['duration', 'call_duration', 'duration_seconds', 'callDuration']) ?? 0
-    );
+    // `call_duration` is a display string ("2.00:49.00" for two minutes and
+    // forty-nine seconds), so Number() on it yields NaN and every call was
+    // recorded as lasting zero seconds. The log carries the value split into
+    // clean integers alongside it; use those and fall back to the loose fields
+    // only for payload shapes that lack them (the webhook's, for instance).
+    const mins = Number(pick(payload, ['call_duration_in_minutes']) ?? NaN);
+    const secs = Number(pick(payload, ['call_duration_in_seconds']) ?? NaN);
+    const duration = Number.isFinite(secs)
+      ? (Number.isFinite(mins) ? mins * 60 : 0) + secs
+      : Number(pick(payload, ['duration', 'duration_seconds', 'callDuration']) ?? 0);
     const score = Number(pick(payload, ['lead_score']) ?? pick(vars, ['lead_score', 'score']) ?? NaN);
 
     return {
       durationSec: Number.isFinite(duration) ? Math.max(0, Math.round(duration)) : 0,
+      // Who hung up and why is the most useful thing on the record when a call
+      // goes wrong, and the log states both.
       endedReason:
+        OmniDimensionProvider.hangup(payload) ??
         text(pick(payload, ['end_reason', 'endReason', 'call_end_reason', 'disconnection_reason'])) ??
         'Completed',
-      recordingUrl: text(pick(payload, ['recording_url', 'recordingUrl', 'audio_url', 'call_recording_url'])),
+      // `internal_recording_url` is absolute; `recording_url` is a bare path
+      // that resolves against this app when put in an <audio src>, so it 404s.
+      recordingUrl:
+        text(pick(payload, ['internal_recording_url'])) ??
+        OmniDimensionProvider.absolute(
+          text(pick(payload, ['recording_url', 'recordingUrl', 'audio_url', 'call_recording_url']))
+        ),
+      fromNumber: text(pick(payload, ['from_number', 'fromNumber', 'caller_id'])),
       transcript: conversation.turns,
       transcriptText: conversation.text,
       summary:
         text(pick(payload, ['call_summary', 'summary', 'conversation_summary'])) ??
-        text(pick(vars, ['summary'])),
+        text(pick(vars, ['summary'])) ??
+        // The REST log has no summary field, but its sentiment analysis opens
+        // with a narrative of what was actually said, which is the closest
+        // thing to one and far better than showing nothing.
+        text(pick(payload, ['sentiment_analysis_details'])),
       // A string "true" counts: extracted variables come back as text.
       interested:
         (sentiment ?? '').toLowerCase() === 'positive' ||
@@ -558,6 +685,40 @@ export class OmniDimensionProvider implements VoiceProvider {
   }
 
   /**
+   * Find the call log a dispatch produced, by its request id.
+   *
+   * Only the recent pages are searched. A call being reconciled was dispatched
+   * minutes ago, so it is at the front of a list ordered newest-first; walking
+   * the whole history to find a call that has not been logged yet would cost
+   * many requests per pass and still come back empty.
+   */
+  private async findLogByRequestId(requestId: string): Promise<any | null> {
+    const wanted = String(requestId);
+
+    for (let page = 1; page <= 3; page++) {
+      const data = await this.request(
+        `calls/logs?page=${page}&page_size=100`,
+        { method: 'GET' },
+        { notFoundIsNull: true }
+      ).catch(() => null);
+
+      const rows: any[] = Array.isArray(data?.call_log_data) ? data.call_log_data : [];
+      if (!rows.length) return null;
+
+      const hit = rows.find((r) => {
+        const req = r?.call_request_id;
+        const id = req && typeof req === 'object' ? req.id : req;
+        return id != null && String(id) === wanted;
+      });
+      if (hit) return hit;
+
+      // Short page means the list is exhausted; no point asking for the next.
+      if (rows.length < 100) return null;
+    }
+    return null;
+  }
+
+  /**
    * The call-log endpoint wraps its row differently depending on the account
    * and the SDK version, so the row is located rather than assumed. A body that
    * holds no recognisable log row (an error object, an empty envelope) yields
@@ -566,6 +727,20 @@ export class OmniDimensionProvider implements VoiceProvider {
   private static unwrapLog(data: any): any | null {
     if (!data || typeof data !== 'object') return null;
     if (data.success === false) return null;
+
+    // `calls/logs/{id}` answers with the *list* envelope narrowed to one row —
+    // { call_log_data: [ … ], total_records: n } — not with the row itself.
+    // Nothing below matches that shape (the loop skips arrays outright), so
+    // every lookup used to fall through and return null, which the reconciler
+    // reads as "the engine has no record of this call". The effect was that no
+    // call ever reconciled: transcripts, recordings and summaries were fetched
+    // successfully and then silently discarded.
+    //
+    // An unknown id is not a 404 here, it is a 200 carrying an empty array, so
+    // an empty list is the genuine "no such call" answer and must stay null.
+    if (Array.isArray(data.call_log_data)) return data.call_log_data[0] ?? null;
+    if (Array.isArray(data.logs)) return data.logs[0] ?? null;
+    if (Array.isArray(data)) return (data as any[])[0] ?? null;
 
     const candidates = [data.json, data.data, data.call_log, data.callLog, data.log, data.call, data.result, data];
     for (const c of candidates) {
@@ -625,9 +800,17 @@ export class OmniDimensionProvider implements VoiceProvider {
       { method: 'GET' },
       { notFoundIsNull: true }
     );
-    if (data == null) return null;
 
-    const log = OmniDimensionProvider.unwrapLog(data);
+    // Two different id namespaces are in play. `calls/dispatch` answers with a
+    // *request* id (what we store as providerCallId), while `calls/logs/{id}`
+    // is keyed by the *log* id — a different number entirely. The two are
+    // linked only by `call_request_id.id` on the log row.
+    //
+    // So a direct lookup by the id we hold returns an empty list rather than a
+    // 404, and every reconcile concluded the engine had never heard of the
+    // call. Fall back to finding the row whose request id matches ours.
+    let log = data == null ? null : OmniDimensionProvider.unwrapLog(data);
+    if (!log) log = await this.findLogByRequestId(id);
     if (!log) return null;
 
     const status = OmniDimensionProvider.logStatus(log);

@@ -4,7 +4,7 @@ import { useCallback, useEffect, useMemo, useState } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
 import {
   PhoneCall, Search, Sparkles, X, FileText, Clock, Loader2, MessageCircle, Download,
-  AlertTriangle, ArrowRight,
+  AlertTriangle, ArrowRight, PlayCircle,
 } from 'lucide-react';
 import { toast } from 'sonner';
 import { ExportButton } from '@/components/export/export-button';
@@ -32,6 +32,8 @@ export interface CallRow {
   fromNumber?: string | null;
   /** Set only when the dial failed before connecting. */
   failureReason?: string | null;
+  /** Audio of the conversation, when the engine kept one. */
+  recordingUrl?: string | null;
   /**
    * Optional so serialisers that predate WhatsApp follow-up keep compiling.
    * When it is absent the lead is resolved by phone number instead — contacts
@@ -359,6 +361,38 @@ export function CallList({ calls, showAgent = true }: { calls: CallRow[]; showAg
                       : <MessageCircle className="w-4 h-4" />}
                     Send WhatsApp follow-up
                   </button>
+                )}
+
+                {/* The recording was being fetched and stored and then never
+                    shown, so the audio of every call existed and was invisible.
+                    It sits above the transcript because hearing thirty seconds
+                    of a call answers questions no summary can. */}
+                {open.recordingUrl && (
+                  <Section
+                    icon={PlayCircle}
+                    title="Call recording"
+                    action={
+                      <a
+                        href={open.recordingUrl}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        download={`call-${open.id}.mp3`}
+                        className="inline-flex items-center gap-1.5 text-xs font-medium text-brand-600 dark:text-brand-400 hover:underline"
+                      >
+                        <Download className="w-3.5 h-3.5" />
+                        Download
+                      </a>
+                    }
+                  >
+                    {/* preload="none" so opening a call does not pull a
+                        megabyte of audio nobody asked to hear. */}
+                    <audio controls preload="none" src={open.recordingUrl} className="w-full">
+                      Your browser cannot play this recording.{' '}
+                      <a href={open.recordingUrl} target="_blank" rel="noopener noreferrer">
+                        Download it instead.
+                      </a>
+                    </audio>
+                  </Section>
                 )}
 
                 {open.summary && (

@@ -136,6 +136,13 @@ export interface CallReport {
   durationSec: number;
   endedReason?: string | null;
   recordingUrl?: string | null;
+  /**
+   * The line the customer saw.
+   *
+   * Trial accounts dial from a shared number that the dispatch response does
+   * not name, so this is often only knowable afterwards, from the call log.
+   */
+  fromNumber?: string | null;
   transcript?: { role: string; text: string }[] | null;
   transcriptText?: string | null;
   summary?: string | null;

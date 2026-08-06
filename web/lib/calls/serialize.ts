@@ -18,6 +18,7 @@ export function toCallRow(c: any): CallRow {
     durationSec: c.durationSec,
     summary: c.summary ?? null,
     transcriptText: c.transcriptText ?? null,
+    recordingUrl: c.recordingUrl ?? null,
     // Why a call never left the building. Only ever set on a failed dial, and
     // the only place the cause is visible after the toast has gone.
     failureReason: c.failureReason ?? null,
