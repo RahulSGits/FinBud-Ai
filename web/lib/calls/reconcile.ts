@@ -35,6 +35,15 @@ const RANK: Record<string, number> = {
 /** Never scan the whole table, however generous a caller is with `limit`. */
 const MAX_BATCH = 200;
 
+/**
+ * How long a call the provider cannot find is given before it is written off.
+ *
+ * Matches the campaign runner's stale window, and for the same reason:
+ * OmniDimension enforces a ten-minute ceiling of its own, so anything shorter
+ * risks closing a call that is genuinely still up.
+ */
+const ORPHAN_AFTER_MS = 12 * 60_000;
+
 export interface ReconcileOutcome {
   callId: string;
   providerCallId: string;
@@ -90,6 +99,10 @@ export async function reconcileInFlightCalls(
       id: true,
       status: true,
       providerCallId: true,
+      // Needed to age out calls the provider cannot account for, and to release
+      // the contact they are holding when that happens.
+      startedAt: true,
+      contactId: true,
       agent: { select: { voiceProvider: true } },
     },
   });
@@ -127,10 +140,46 @@ export async function reconcileInFlightCalls(
     try {
       const result = await fetchResult(providerCallId);
 
-      // The engine has no record of this call. Leave the row exactly as we
-      // found it — inventing an outcome here would fabricate a result for a
-      // call nobody can account for. The stale reaper gets the last word.
-      if (!result) continue;
+      // The engine has no record of this call.
+      //
+      // Usually transient — the id has not propagated yet — so a recent call is
+      // left exactly as found: inventing an outcome would fabricate a result
+      // for a call nobody can account for.
+      //
+      // Past the stale window it is not transient. The common cause is a
+      // rotated API key: call ids belong to the account that issued them, so
+      // every in-flight call becomes permanently unknowable the moment the key
+      // changes. Those rows would otherwise sit "ringing" forever, holding a
+      // concurrency slot and never releasing their contact. Close them with a
+      // reason that names the cause rather than pretending the call happened.
+      if (!result) {
+        const age = Date.now() - call.startedAt.getTime();
+        if (age < ORPHAN_AFTER_MS) continue;
+
+        await db.call.update({
+          where: { id: call.id },
+          data: {
+            status: 'failed',
+            endedAt: new Date(),
+            failureReason:
+              'Not dispatched: the voice provider has no record of this call. It was most likely ' +
+              'placed with a different API key, whose call ids the current account cannot read.',
+          },
+        });
+        // Release the contact so it can be dialled again rather than staying
+        // stuck at "calling" behind a call that can never report.
+        if (call.contactId) {
+          await db.contact.updateMany({
+            where: { id: call.contactId, status: 'calling' },
+            data: { status: 'retry', nextAttemptAt: new Date() },
+          });
+        }
+
+        outcome.to = 'failed';
+        outcome.changed = true;
+        updated++;
+        continue;
+      }
 
       const next = result.status as CallStatus;
       outcome.to = next;

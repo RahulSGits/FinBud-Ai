@@ -1,5 +1,5 @@
 import { type NextRequest, NextResponse } from 'next/server';
-import { jwtVerify } from 'jose';
+import { verifySessionToken } from './lib/edge-jwt';
 
 // Middleware only decides *where to send an unauthenticated browser*. It is not
 // the security boundary — every API route and server page re-checks the session
@@ -7,26 +7,16 @@ import { jwtVerify } from 'jose';
 const PROTECTED = ['/dashboard', '/admin'];
 const ADMIN_ONLY = ['/admin'];
 
-async function readSession(token: string | undefined) {
-  if (!token) return null;
-  const secret = process.env.AUTH_SECRET;
-  if (!secret) return null;
-
-  try {
-    const { payload } = await jwtVerify(token, new TextEncoder().encode(secret));
-    return { id: String(payload.sub ?? ''), role: String(payload.role ?? '') };
-  } catch {
-    return null;
-  }
-}
-
 export async function middleware(request: NextRequest) {
   const { pathname } = request.nextUrl;
 
   const needsAuth = PROTECTED.some((p) => pathname.startsWith(p));
   if (!needsAuth) return NextResponse.next();
 
-  const session = await readSession(request.cookies.get('finbud_session')?.value);
+  const session = await verifySessionToken(
+    request.cookies.get('finbud_session')?.value,
+    process.env.AUTH_SECRET
+  );
 
   if (!session) {
     const url = request.nextUrl.clone();

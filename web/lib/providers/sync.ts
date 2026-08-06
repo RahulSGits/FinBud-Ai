@@ -5,6 +5,7 @@
 // A sync failure never loses the user's edit — it is captured in Agent.syncError
 // and surfaced in the UI, so the agent still exists locally and can be retried.
 import { db } from '../db';
+import { ensureAccountCurrent } from './account';
 import { agentToConfig, getProvider, isMockMode } from './index';
 
 export interface SyncResult {
@@ -36,9 +37,16 @@ export async function syncAgent(agentId: string): Promise<SyncResult> {
     return { synced: false, error };
   }
 
+  // Detect a rotated credential before doing anything with a stored id. This
+  // clears ids the previous key issued, so the branch below creates rather than
+  // fruitlessly updating something the new account has never heard of.
+  await ensureAccountCurrent(provider.id);
+
   try {
     const config = agentToConfig(agent);
-    let externalAgentId = agent.externalAgentId;
+    // Re-read: ensureAccountCurrent may have just cleared this agent's id.
+    const fresh = await db.agent.findUnique({ where: { id: agentId }, select: { externalAgentId: true } });
+    let externalAgentId = fresh?.externalAgentId ?? null;
 
     if (externalAgentId) {
       try {
