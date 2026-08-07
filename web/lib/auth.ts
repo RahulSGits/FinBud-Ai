@@ -3,6 +3,7 @@
 // There is no public sign-up. An admin invites an email address, Resend
 // delivers a one-time link, and the recipient sets their own password. That is
 // the only way an account comes into existence.
+import { cache } from 'react';
 import { cookies } from 'next/headers';
 import { createHash, randomBytes, timingSafeEqual } from 'crypto';
 import bcrypt from 'bcryptjs';
@@ -127,8 +128,18 @@ export function destroySession(): void {
  * The database is checked on every request rather than trusting the JWT alone,
  * so disabling a user takes effect immediately instead of when their token
  * happens to expire.
+ *
+ * Memoised per request with React's cache(). Every protected screen resolves
+ * the session at least twice — the layout gates the section, and the page gates
+ * itself again because a layout is not re-executed on client-side navigation —
+ * and several pages then call it a third time through requireUser. Each of
+ * those was an identical round trip to the database, which on a deployment
+ * whose Postgres lives in another region is most of the time before the page
+ * even starts querying its own data. cache() collapses them to one lookup per
+ * request while keeping the freshness guarantee above: the memo lives exactly
+ * as long as the render, so the next request re-reads the row.
  */
-export async function getCurrentUser(): Promise<SessionUser | null> {
+export const getCurrentUser = cache(async function getCurrentUser(): Promise<SessionUser | null> {
   const token = cookies().get(COOKIE)?.value;
   if (!token) return null;
 
@@ -153,7 +164,7 @@ export async function getCurrentUser(): Promise<SessionUser | null> {
   } catch {
     return null;
   }
-}
+});
 
 /** Throwing guards for route handlers. */
 export class AuthError extends Error {

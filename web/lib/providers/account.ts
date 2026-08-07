@@ -12,6 +12,7 @@
 // re-syncs on next use.
 import { createHash } from 'crypto';
 import { db } from '../db';
+import { clearCatalogues } from './catalogue-cache';
 import type { ProviderId } from './types';
 
 /**
@@ -91,6 +92,11 @@ export async function ensureAccountCurrent(provider: ProviderId): Promise<Accoun
   });
 
   await db.setting.upsert({ where: { key }, create: { key, value: current }, update: { value: current } });
+
+  // Catalogues are per-account too. A cached voice list from the old key would
+  // otherwise be served for the rest of the TTL, offering voices the new
+  // account may not have.
+  clearCatalogues();
 
   await db.auditLog
     .create({

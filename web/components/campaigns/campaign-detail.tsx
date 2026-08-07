@@ -20,7 +20,10 @@ import {
   X,
 } from 'lucide-react';
 import type { LeadStatus } from '@prisma/client';
-import { OutcomeDonut } from '@/components/analytics/charts';
+// Lazy: this screen shows one donut well below the fold, and a static import
+// would put the whole charting library in the first-load bundle of the busiest
+// page in the app.
+import { OutcomeDonut } from '@/components/analytics/charts-lazy';
 import { CampaignControls } from './campaign-controls';
 import { CampaignForm, type CampaignAgentOption } from './campaign-form';
 import { describeWindow, parseBusinessHours } from '@/lib/campaigns/business-hours';

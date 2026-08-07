@@ -24,17 +24,20 @@ import {
   X,
 } from 'lucide-react';
 import type { AgentStat, AnalyticsPayload, AnalyticsTotals, EmployeeStat } from '@/lib/analytics';
+// Charts load on demand; the helpers do not need recharts and load eagerly.
 import {
   AgentOutcomeChart,
   DailyTrendChart,
   EmployeeComparisonChart,
+  OutcomeDonut,
+} from './charts-lazy';
+import {
   OUTCOME_COLOUR,
   OUTCOME_ORDER,
-  OutcomeDonut,
   type OutcomeStatus,
   formatDuration,
   outcomeLabel,
-} from './charts';
+} from './chart-utils';
 import { cn } from '@/lib/utils';
 
 // Declared here rather than imported from lib/analytics: that module imports the

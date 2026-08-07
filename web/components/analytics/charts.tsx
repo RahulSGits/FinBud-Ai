@@ -45,55 +45,28 @@ const SERIES = {
 type SeriesKey = keyof typeof SERIES;
 const SERIES_KEYS = Object.keys(SERIES) as SeriesKey[];
 
-/** The lead outcome each slice/segment/bar represents. */
-export type OutcomeStatus = OutcomeSlice['status'];
+// Outcome colours, ordering and the two formatters now live in ./chart-utils,
+// which imports no charting library, so a server component or a plain badge can
+// use them without pulling recharts into its bundle. Re-exported here so the
+// many existing `from './charts'` imports keep working unchanged.
+export {
+  OUTCOME_COLOUR,
+  OUTCOME_ORDER,
+  outcomeLabel,
+  formatDuration,
+  type OutcomeStatus,
+} from './chart-utils';
 
-/**
- * Shared by the donut, the per-agent stack and the table mixes, so the three
- * always agree.
- *
- * Drawn from the Okabe–Ito qualitative palette: the outcomes that matter most
- * (interested / not interested) would otherwise be the classic green-vs-red
- * pair, which a deuteranope cannot separate. These six stay distinguishable
- * under all three common forms of colour blindness, and each carries enough
- * lightness contrast to survive a greyscale print too.
- */
-export const OUTCOME_COLOUR: Record<string, string> = {
-  interested: '#009e73',
-  callback_requested: '#e69f00',
-  not_interested: '#d55e00',
-  no_answer: '#94a3b8',
-  voicemail: '#cc79a7',
-  unknown: '#0072b2',
-};
-
-/**
- * Fixed reading order for stacks and legends. Typed against the payload's own
- * status union, so a renamed or added LeadStatus fails the build here rather
- * than silently dropping out of the chart.
- */
-export const OUTCOME_ORDER: readonly OutcomeStatus[] = [
-  'interested',
-  'callback_requested',
-  'not_interested',
-  'no_answer',
-  'voicemail',
-  'unknown',
-];
-
-export function outcomeLabel(status: string): string {
-  return status.replace(/_/g, ' ');
-}
-
-export function formatDuration(seconds: number): string {
-  if (!seconds) return '0s';
-  const hours = Math.floor(seconds / 3600);
-  const mins = Math.floor((seconds % 3600) / 60);
-  const secs = Math.round(seconds % 60);
-  if (hours) return `${hours}h ${mins}m`;
-  if (mins) return `${mins}m ${secs}s`;
-  return `${secs}s`;
-}
+// Also imported, not only re-exported: a re-export forwards the names to
+// consumers without binding them in this module's own scope, and the charts
+// below use all of them.
+import {
+  OUTCOME_COLOUR,
+  OUTCOME_ORDER,
+  outcomeLabel,
+  formatDuration,
+  type OutcomeStatus,
+} from './chart-utils';
 
 function formatDay(date: string): string {
   // 'YYYY-MM-DD' parses as UTC midnight; anchor it locally so the label cannot

@@ -24,6 +24,7 @@ import {
   StartCallParams, StartCallResult,
   VoiceEvent, VoiceOption, VoiceProvider, buildSystemPrompt, normaliseStatus,
 } from './types';
+import { cachedCatalogue } from './catalogue-cache';
 
 const BASE = 'https://backend.omnidim.io/api/v1';
 
@@ -315,6 +316,10 @@ export class OmniDimensionProvider implements VoiceProvider {
   ];
 
   async listVoices(): Promise<VoiceOption[]> {
+    return cachedCatalogue('omnidimension:voices', () => this.loadVoices());
+  }
+
+  private async loadVoices(): Promise<VoiceOption[]> {
     let catalogue: VoiceOption[] = [];
     try {
       // page_size is explicit: the API defaults to 30, which silently truncates
@@ -347,6 +352,10 @@ export class OmniDimensionProvider implements VoiceProvider {
   }
 
   async listModels(): Promise<ModelOption[]> {
+    return cachedCatalogue('omnidimension:models', () => this.loadModels());
+  }
+
+  private async loadModels(): Promise<ModelOption[]> {
     // Three separate endpoints, one per stage of the pipeline. There is no
     // combined `providers/models` route — the previous implementation called
     // one and always got a 404, so the model list was permanently empty.

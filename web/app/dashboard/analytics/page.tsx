@@ -16,7 +16,8 @@ import {
 import { getCurrentUser } from '@/lib/auth';
 import { DEFAULT_DAYS, RANGE_OPTIONS, computeMyAnalytics } from '@/lib/analytics';
 import { PageHeader } from '@/components/shell/page-header';
-import { DailyTrendChart, OutcomeDonut } from '@/components/analytics/charts';
+import { DailyTrendChart, OutcomeDonut } from '@/components/analytics/charts-lazy';
+import { formatDuration, outcomeLabel as humanise } from '@/components/analytics/chart-utils';
 import { cn } from '@/lib/utils';
 
 export const dynamic = 'force-dynamic';
@@ -28,22 +29,10 @@ function num(value: number): string {
   return NUMBER.format(value);
 }
 
-// Deliberately not imported from components/analytics/charts: that module is a
-// client component, so its exports arrive here as client references that a
-// server render cannot call.
-function formatDuration(seconds: number): string {
-  if (!seconds) return '0s';
-  const hours = Math.floor(seconds / 3600);
-  const mins = Math.floor((seconds % 3600) / 60);
-  const secs = Math.round(seconds % 60);
-  if (hours) return `${hours}h ${mins}m`;
-  if (mins) return `${mins}m ${secs}s`;
-  return `${secs}s`;
-}
-
-function humanise(value: string): string {
-  return value.replace(/_/g, ' ');
-}
+// formatDuration and humanise used to be copied into this file, because the
+// originals lived in a 'use client' module whose exports a server render cannot
+// call. They now live in components/analytics/chart-utils — a plain module with
+// no recharts — so both are imported instead of duplicated.
 
 /** Pipeline colours. Chosen to read on both card backgrounds, like the charts. */
 const PIPELINE_COLOUR: Record<ContactStatus, string> = {
