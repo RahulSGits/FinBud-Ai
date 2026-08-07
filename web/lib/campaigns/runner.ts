@@ -11,6 +11,7 @@
 import { CallStatus, CampaignStatus, ContactStatus } from '@prisma/client';
 import { db } from '../db';
 import { agentToConfig, getProvider, isMockMode } from '../providers';
+import { noteDispatchOutcome } from '../providers/usage';
 import { isWithinBusinessHours, parseBusinessHours } from './business-hours';
 
 const IN_FLIGHT: CallStatus[] = [CallStatus.initiated, CallStatus.ringing, CallStatus.in_progress];
@@ -272,6 +273,10 @@ export async function tickCampaign(campaignId: string): Promise<TickResult> {
       // Keep the provider's own detail — a generic message hides the fix.
       const reason = [err?.message, err?.detail].filter(Boolean).join(' — ').slice(0, 400);
       console.error(`[campaign ${campaignId}] dial failed for ${contact.phone}: ${reason}`);
+      // A campaign is where credit actually runs out — it dials in bulk and
+      // unattended — so the out-of-credit signal has to be captured here too,
+      // not only on the manual path somebody is watching.
+      void noteDispatchOutcome(reason);
 
       await db.call.update({
         where: { id: call.id },

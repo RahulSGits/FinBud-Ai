@@ -8,6 +8,7 @@ import { CallStatus, ContactStatus, Role } from '@prisma/client';
 import { db } from '../db';
 import { normalisePhone } from '../contacts/phone';
 import { agentToConfig, getProvider, isMockMode } from '../providers';
+import { noteDispatchOutcome } from '../providers/usage';
 import type { SessionUser } from '../auth';
 
 /** Default calls-per-person-per-day when neither user nor Setting overrides it. */
@@ -153,11 +154,18 @@ export async function placeCall(opts: {
     await db.auditLog.create({
       data: { action: 'call.started', entity: 'Call', entityId: call.id, userId: opts.user.id },
     });
+    // Proof the account can pay for calls, which clears any standing
+    // out-of-credit warning without anyone having to dismiss it.
+    void noteDispatchOutcome(null);
 
     return { callId: call.id, status: result.status as CallStatus, mock: isMockMode() };
   } catch (err: any) {
     // Keep the provider's own detail — a generic message hides the fix.
     const detail = [err?.message, err?.detail].filter(Boolean).join(' — ').slice(0, 400);
+    // "insufficient_balance" is the only credit fact this API will ever tell
+    // us, so it is captured here and shown on the settings panel rather than
+    // living only in one call's failure reason.
+    void noteDispatchOutcome(detail);
     // "Not dispatched" is the honest framing: the call never reached the
     // network, so this is not a customer who declined. The call log shows this
     // string verbatim, which is the only place the cause is ever visible.

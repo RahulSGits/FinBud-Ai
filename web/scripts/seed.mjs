@@ -1,5 +1,11 @@
-// Seeds a working demo: one admin, two employees, an agent, contacts and a
-// campaign ready to dial.
+// Seeds the accounts and the starter WhatsApp templates. Nothing else.
+//
+// It used to also create a demo agent, a demo campaign and eight invented
+// contacts with Indian names and plausible loan amounts. Those rows are
+// indistinguishable from real ones in the dashboard, and a re-seed silently put
+// them back after they had been deleted — so a call log that looked like real
+// activity was mostly fixtures. Agents, campaigns and contacts are now only
+// ever created by a person or an import.
 //
 //   node scripts/seed.mjs
 //
@@ -20,44 +26,6 @@ const PEOPLE = [
   { email: 'gaurav@financebuddha.com', name: 'Gaurav', employeeId: 'FB-001', role: 'admin', department: 'Operations', designation: 'Head of Operations' },
   { email: 'rahul@financebuddha.com', name: 'Rahul', employeeId: 'FB-014', role: 'employee', department: 'Sales', designation: 'Loan Advisor' },
   { email: 'aditya@financebuddha.com', name: 'Aditya', employeeId: 'FB-021', role: 'employee', department: 'Sales', designation: 'Loan Advisor' },
-];
-
-const AGENT = {
-  name: 'Home Loan Qualifier',
-  description: 'Calls home-loan applicants to confirm interest and book a callback',
-  isActive: true,
-  firstMessage:
-    'Hello {{customer_name}}, this is Priya calling from Finance Buddha about the home loan enquiry you submitted. Is now a good time to talk?',
-  systemPrompt:
-    'You are Priya, a warm and efficient loan advisor at Finance Buddha. You speak clearly and never rush the customer. If asked directly, you say you are an AI assistant. You never invent interest rates, approval decisions or offers.',
-  businessContext:
-    'Finance Buddha arranges home loans, personal loans and balance transfers through partner banks.\nApplications are submitted online and a human loan officer completes the paperwork.\nA loan officer can call back the same day or the next morning.',
-  callObjective:
-    'Confirm the customer still wants a home loan and book a callback with a human loan officer. The call is successful when a callback slot is agreed or the customer clearly declines.',
-  qualificationRules:
-    'Ask whether they are still looking for a loan.\nAsk roughly how much they need and what the property is for.\nAsk whether they are salaried or self employed.\nA lead is qualified when they still want the loan and agree to speak with a loan officer.',
-  objectionHandling:
-    'I already took a loan elsewhere -> Thank them, ask if they would like a balance transfer review, and accept no as an answer.\nI am busy right now -> Offer to call back at a time they choose and end the call quickly.\nHow did you get my number -> Explain they submitted an enquiry on the Finance Buddha website.',
-  complianceRules:
-    'Identify yourself and the company within the first sentence.\nIf the customer asks to be removed from the list, apologise, confirm they will not be called again, and end the call immediately.\nNever quote a specific interest rate or promise approval.\nDo not call outside 9am to 8pm.',
-  closingScript:
-    'Interested: confirm the callback time, repeat it back, thank them and end.\nNot interested: thank them for their time and end without pushing.\nCallback requested: confirm the time they asked for and end.',
-  llmModel: 'openai/gpt-4o-mini',
-  sttModel: 'deepgram/nova-3',
-  ttsModel: 'cartesia/sonic-3',
-  language: 'multi',
-  voiceProvider: 'livekit',
-};
-
-const CONTACTS = [
-  { name: 'Rahul Sharma', phone: '+919812345001', company: 'Infosys', loanType: 'home', loanAmount: 4500000, email: 'rahul.sharma@example.com' },
-  { name: 'Priya Nair', phone: '+919812345002', company: 'Wipro', loanType: 'home', loanAmount: 3200000, email: 'priya.nair@example.com' },
-  { name: 'Imran Qureshi', phone: '+919812345003', company: 'Self-employed', loanType: 'personal', loanAmount: 800000, email: 'imran.q@example.com' },
-  { name: 'Sneha Patil', phone: '+919812345004', company: 'TCS', loanType: 'balance_transfer', loanAmount: 2900000, email: 'sneha.patil@example.com' },
-  { name: 'Vikram Reddy', phone: '+919812345005', company: 'Deloitte', loanType: 'home', loanAmount: 6100000, email: 'vikram.reddy@example.com' },
-  { name: 'Anjali Desai', phone: '+919812345006', company: 'HDFC', loanType: 'personal', loanAmount: 550000, email: 'anjali.desai@example.com' },
-  { name: 'Karthik Iyer', phone: '+919812345007', company: 'Zoho', loanType: 'home', loanAmount: 3800000, email: 'karthik.iyer@example.com' },
-  { name: 'Meera Joshi', phone: '+919812345008', company: 'Freelance', loanType: 'personal', loanAmount: 400000, email: 'meera.joshi@example.com' },
 ];
 
 // Written to be sent as-is: no markdown headings, short lines, and a clear
@@ -123,53 +91,8 @@ async function main() {
       })
     );
   }
-  const [admin, ravi, neha] = users;
+  const [admin] = users;
   console.log(`Users: ${users.map((u) => u.email).join(', ')}`);
-
-  // Agents have no natural unique key, so match on name to stay idempotent.
-  const existingAgent = await prisma.agent.findFirst({ where: { name: AGENT.name } });
-  const agent = existingAgent
-    ? await prisma.agent.update({ where: { id: existingAgent.id }, data: AGENT })
-    : await prisma.agent.create({ data: { ...AGENT, createdById: admin.id } });
-  console.log(`Agent: ${agent.name}`);
-
-  const existingCampaign = await prisma.campaign.findFirst({
-    where: { name: 'July home loan follow-ups' },
-  });
-  const campaign = existingCampaign
-    ? await prisma.campaign.update({
-        where: { id: existingCampaign.id },
-        data: { agentId: agent.id, concurrency: 3, retryLimit: 1, retryDelayMins: 30 },
-      })
-    : await prisma.campaign.create({
-        data: {
-          name: 'July home loan follow-ups',
-          agentId: agent.id,
-          createdById: admin.id,
-          status: 'draft',
-          concurrency: 3,
-          retryLimit: 1,
-          retryDelayMins: 30,
-          businessHours: { tz: 'Asia/Kolkata', days: [1, 2, 3, 4, 5, 6], start: '09:00', end: '20:00' },
-        },
-      });
-  console.log(`Campaign: ${campaign.name}`);
-
-  // Alternate ownership so both employees have leads to work.
-  const owners = [ravi.id, neha.id];
-  for (const [i, c] of CONTACTS.entries()) {
-    await prisma.contact.upsert({
-      where: { phone: c.phone },
-      update: { ...c, campaignId: campaign.id, assignedToId: owners[i % owners.length] },
-      create: {
-        ...c,
-        campaignId: campaign.id,
-        assignedToId: owners[i % owners.length],
-        status: 'pending',
-      },
-    });
-  }
-  console.log(`Contacts: ${CONTACTS.length}`);
 
   // Starter WhatsApp follow-ups, one per outcome staff actually act on. Matched
   // on name so editing a body in the UI is not overwritten by a re-seed.
@@ -184,7 +107,7 @@ async function main() {
   for (const p of PEOPLE) {
     console.log(`  ${p.email}  (or ${p.employeeId})   ${PASSWORD}   [${p.role}]`);
   }
-  console.log('\nStart the campaign from /admin/campaigns to watch calls run.');
+  console.log('\nNo agents, campaigns or contacts are created — build those in the app.');
 }
 
 main()

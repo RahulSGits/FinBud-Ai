@@ -8,7 +8,7 @@
 // own per-call costs, so the panel is honest about which numbers are observed
 // and which one is an estimate resting on what somebody typed.
 import { useCallback, useEffect, useState } from 'react';
-import { Loader2, RefreshCw, Wallet } from 'lucide-react';
+import { AlertTriangle, Loader2, RefreshCw, Wallet } from 'lucide-react';
 import { toast } from 'sonner';
 
 interface Usage {
@@ -21,6 +21,8 @@ interface Usage {
   remaining: number | null;
   remainingMinutes: number | null;
   balanceRecordedAt: string | null;
+  outOfCredits: boolean;
+  outOfCreditsAt: string | null;
   error: string | null;
 }
 
@@ -64,6 +66,25 @@ export function UsageCard() {
 
   useEffect(() => {
     void load();
+
+    // Keep it current on its own. Spend only moves when a call ends, so a
+    // minute is frequent enough to feel live without hammering the provider —
+    // and it means the out-of-credit warning appears while the page is open
+    // rather than waiting for someone to press Refresh.
+    const timer = setInterval(() => void load(false), 60_000);
+
+    // Refresh on return to the tab too: a minute of drift is invisible while
+    // you are looking away, but stale numbers on the moment you look back are
+    // exactly what makes a dashboard feel dead.
+    const onVisible = () => {
+      if (document.visibilityState === 'visible') void load(false);
+    };
+    document.addEventListener('visibilitychange', onVisible);
+
+    return () => {
+      clearInterval(timer);
+      document.removeEventListener('visibilitychange', onVisible);
+    };
   }, [load]);
 
   async function saveBalance(amount: string | null) {
@@ -120,6 +141,27 @@ export function UsageCard() {
         <p className="text-xs text-amber-600 dark:text-amber-400">{usage.error}</p>
       ) : (
         <>
+          {/* The one credit fact the API will tell us, detected from a real
+              refused dispatch rather than typed in. Clears itself as soon as a
+              call goes through again. */}
+          {usage.outOfCredits && (
+            <div className="mb-4 flex items-start gap-2.5 rounded-xl border border-red-500/20 bg-red-500/[0.06] px-3.5 py-3">
+              <AlertTriangle className="w-4 h-4 shrink-0 text-red-600 dark:text-red-400 mt-0.5" />
+              <div className="min-w-0">
+                <p className="text-sm font-medium text-red-700 dark:text-red-300">
+                  Out of credits — calls are being refused
+                </p>
+                <p className="text-xs text-red-600/90 dark:text-red-400/80 mt-0.5 leading-relaxed">
+                  OmniDimension turned down a call for want of balance
+                  {usage.outOfCreditsAt
+                    ? ` on ${new Date(usage.outOfCreditsAt).toLocaleString()}`
+                    : ''}
+                  . Top up on their dashboard; this clears itself once a call connects again.
+                </p>
+              </div>
+            </div>
+          )}
+
           <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 mb-4">
             <Stat label="Time left" value={usage.remainingMinutes == null ? '—' : runway(usage.remainingMinutes)} accent />
             <Stat label="Credits left" value={usage.remaining == null ? '—' : money(usage.remaining)} accent />

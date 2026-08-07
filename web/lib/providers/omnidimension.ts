@@ -223,7 +223,27 @@ export class OmniDimensionProvider implements VoiceProvider {
         config.language === 'multi' ? ['English (India)', 'Hindi'] : [config.language];
     }
 
-    if (config.webhookUrl) body.webhook_url = config.webhookUrl;
+    // Where to push the result the moment a call ends.
+    //
+    // This used to be sent as a top-level `webhook_url`, which the API ignores:
+    // the field belongs inside post_call_actions.webhook. The agent therefore
+    // read back webhook_url: "" — the webhook was enabled with nowhere to post,
+    // so no push event could ever arrive and every result had to be polled for.
+    // "Real time" meant "while somebody has a dashboard tab open".
+    //
+    // Only a publicly reachable URL is worth sending. NEXT_PUBLIC_APP_URL is
+    // http://localhost:3000 in development, and registering that would point
+    // OmniDimension's servers at their own loopback.
+    const hook = OmniDimensionProvider.publicWebhook(config.webhookUrl);
+    if (hook) {
+      body.post_call_actions.webhook.url = hook;
+    } else if (config.webhookUrl) {
+      console.warn(
+        `[omnidimension] not registering webhook ${config.webhookUrl}: it is not publicly reachable, ` +
+          'so results will be polled instead. Set NEXT_PUBLIC_APP_URL to the deployed URL for push delivery.'
+      );
+    }
+
     if (config.transferEnabled && config.transferNumber) body.transfer_number = config.transferNumber;
     return body;
   }
@@ -718,6 +738,38 @@ export class OmniDimensionProvider implements VoiceProvider {
     return /^(none|n\/?a|null|unknown|nothing|not applicable|no objections?)\.?$/i.test(v)
       ? null
       : v;
+  }
+
+  /**
+   * A webhook URL OmniDimension's servers could actually reach, or null.
+   *
+   * Registering a loopback or private address would be worse than registering
+   * nothing: the agent would report a configured webhook that silently never
+   * fires, and the polling fallback is only reached because the row is still
+   * in flight.
+   */
+  private static publicWebhook(url: string | null | undefined): string | null {
+    if (!url) return null;
+    let parsed: URL;
+    try {
+      parsed = new URL(url);
+    } catch {
+      return null;
+    }
+    if (parsed.protocol !== 'https:' && parsed.protocol !== 'http:') return null;
+
+    const host = parsed.hostname.toLowerCase();
+    const unreachable =
+      host === 'localhost' ||
+      host.endsWith('.localhost') ||
+      host === '127.0.0.1' ||
+      host === '::1' ||
+      host === '0.0.0.0' ||
+      /^10\./.test(host) ||
+      /^192\.168\./.test(host) ||
+      /^172\.(1[6-9]|2\d|3[01])\./.test(host);
+
+    return unreachable ? null : url;
   }
 
   /** Resolve a provider-relative URL against OmniDimension's own host. */

@@ -17,6 +17,44 @@ import type { ProviderId } from './types';
 /** Where the admin records the balance shown on the provider's own dashboard. */
 export const BALANCE_KEY = 'provider:omnidimension:balance';
 
+/** Where the last known credit state is remembered between requests. */
+const CREDIT_STATE_KEY = 'provider:omnidimension:credit-state';
+
+/**
+ * Record whether the engine could pay for a call.
+ *
+ * The balance itself cannot be read — OmniDimension exposes it only under
+ * /reseller, which answers 403 to an ordinary key — but running out is
+ * observable: a dispatch comes back 402 `insufficient_balance`. That is the one
+ * credit fact the API will tell us, so it is captured wherever a dial is
+ * attempted and surfaced on the settings panel without anyone typing anything.
+ *
+ * Also clears itself. A successful dispatch is proof the account has credit
+ * again, so a top-up resolves the warning on the next call rather than leaving
+ * a stale "out of credits" banner that has to be dismissed by hand.
+ */
+export async function noteDispatchOutcome(detail: string | null): Promise<void> {
+  const outOfCredits =
+    !!detail && /insufficient[_\s]balance|balance is (too )?low|choose appropriate plan/i.test(detail);
+
+  try {
+    if (outOfCredits) {
+      const value = { outOfCredits: true, at: new Date().toISOString(), detail: detail!.slice(0, 300) };
+      await db.setting.upsert({
+        where: { key: CREDIT_STATE_KEY },
+        create: { key: CREDIT_STATE_KEY, value },
+        update: { value },
+      });
+    } else if (detail === null) {
+      // Only a *successful* dispatch clears it. Any other failure says nothing
+      // about the balance, so it must not wipe a real warning.
+      await db.setting.deleteMany({ where: { key: CREDIT_STATE_KEY } });
+    }
+  } catch {
+    // Billing telemetry must never break a call.
+  }
+}
+
 export interface ProviderUsage {
   provider: ProviderId;
   /** Calls the engine has a record of, within the window inspected. */
@@ -35,6 +73,10 @@ export interface ProviderUsage {
   remainingMinutes: number | null;
   /** When the balance was recorded, so a stale one is obvious. */
   balanceRecordedAt: string | null;
+  /** True when the engine last refused a call for want of credit. */
+  outOfCredits: boolean;
+  /** When that refusal happened. */
+  outOfCreditsAt: string | null;
   /** Set when the engine could not be asked, so the UI says why. */
   error: string | null;
 }
@@ -61,6 +103,8 @@ export async function providerUsage(providerId?: ProviderId): Promise<ProviderUs
     remaining: null,
     remainingMinutes: null,
     balanceRecordedAt: null,
+    outOfCredits: false,
+    outOfCreditsAt: null,
     error: null,
   };
 
@@ -80,7 +124,11 @@ export async function providerUsage(providerId?: ProviderId): Promise<ProviderUs
   const ratePerMinute =
     measured.talkSeconds > 0 ? measured.spend / (measured.talkSeconds / 60) : ASSUMED_RATE;
 
-  const row = await db.setting.findUnique({ where: { key: BALANCE_KEY } }).catch(() => null);
+  const [row, creditRow] = await Promise.all([
+    db.setting.findUnique({ where: { key: BALANCE_KEY } }).catch(() => null),
+    db.setting.findUnique({ where: { key: CREDIT_STATE_KEY } }).catch(() => null),
+  ]);
+  const credit = creditRow?.value as any;
   const stored = row?.value as any;
   const balance = Number.isFinite(Number(stored?.amount)) ? Number(stored.amount) : null;
   const recordedAt = typeof stored?.recordedAt === 'string' ? stored.recordedAt : null;
@@ -107,6 +155,8 @@ export async function providerUsage(providerId?: ProviderId): Promise<ProviderUs
     remainingMinutes:
       remaining == null || ratePerMinute <= 0 ? null : Math.floor(remaining / ratePerMinute),
     balanceRecordedAt: recordedAt,
+    outOfCredits: !!credit?.outOfCredits,
+    outOfCreditsAt: typeof credit?.at === 'string' ? credit.at : null,
     error: null,
   };
 }
