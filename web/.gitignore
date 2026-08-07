@@ -11,3 +11,7 @@ node_modules
 # Local SQLite database
 /prisma/dev.db
 /prisma/dev.db-journal
+
+# Transient esbuild output from scripts/setup-production.mjs (removed on success,
+# but a killed run can leave one behind).
+.sync-*/
