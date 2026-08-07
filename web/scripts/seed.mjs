@@ -17,9 +17,9 @@ const prisma = new PrismaClient();
 const PASSWORD = 'Finbud@2026';
 
 const PEOPLE = [
-  { email: 'admin@financebuddha.com', name: 'Gaurav', employeeId: 'FB-001', role: 'admin', department: 'Operations', designation: 'Head of Operations' },
-  { email: 'ravi@financebuddha.com', name: 'Rahul', employeeId: 'FB-014', role: 'employee', department: 'Sales', designation: 'Loan Advisor' },
-  { email: 'neha@financebuddha.com', name: 'Aditya', employeeId: 'FB-021', role: 'employee', department: 'Sales', designation: 'Loan Advisor' },
+  { email: 'gaurav@financebuddha.com', name: 'Gaurav', employeeId: 'FB-001', role: 'admin', department: 'Operations', designation: 'Head of Operations' },
+  { email: 'rahul@financebuddha.com', name: 'Rahul', employeeId: 'FB-014', role: 'employee', department: 'Sales', designation: 'Loan Advisor' },
+  { email: 'aditya@financebuddha.com', name: 'Aditya', employeeId: 'FB-021', role: 'employee', department: 'Sales', designation: 'Loan Advisor' },
 ];
 
 const AGENT = {

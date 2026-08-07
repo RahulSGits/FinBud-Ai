@@ -18,8 +18,12 @@ export default async function TeamPage() {
   if (!me) redirect('/login');
   if (me.role !== Role.admin) redirect('/dashboard');
 
+  // Admins first, then by employee id rather than by name. Employee ids are
+  // assigned in joining order, so the roster reads the way the team actually
+  // grew — and, unlike a name sort, it does not reshuffle the moment somebody
+  // is renamed.
   const users = await db.user.findMany({
-    orderBy: [{ role: 'asc' }, { name: 'asc' }],
+    orderBy: [{ role: 'asc' }, { employeeId: 'asc' }],
     include: { _count: { select: { assignedContacts: true } } },
   });
 
