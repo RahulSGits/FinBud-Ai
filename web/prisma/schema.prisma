@@ -73,6 +73,7 @@ model User {
   auditLogs        AuditLog[]
   templates        MessageTemplate[] @relation("TemplateCreatedBy")
   messagesSent     Message[]         @relation("MessageSentBy")
+  findingsReviewed CallFinding[]
 
   @@index([role, status])
 }
@@ -229,6 +230,7 @@ model Contact {
   calls    Call[]
   notes    Note[]
   messages Message[]
+  findings CallFinding[]
 
   /// One row per phone number — re-importing a sheet updates rather than
   /// duplicating, which is the most common data-quality problem here.
@@ -356,6 +358,7 @@ model Call {
 
   notes    Note[]
   messages Message[]
+  findings CallFinding[]
 
   @@index([status])
   @@index([startedAt])
@@ -543,4 +546,80 @@ model AuditLog {
 
   @@index([entity, entityId])
   @@index([createdAt])
+}
+
+// ---------------------------------------------------------------------------
+// What a call claimed about a customer, and whether anyone has agreed with it.
+//
+// The engine's post-call extraction is a language model's reading of a phone
+// call. It is useful, and it is a guess. Until now those guesses were written
+// straight onto the Contact as fact: a model that mistook politeness for
+// interest silently changed a lead's status, and nothing recorded that a
+// machine had decided it or what it heard.
+//
+// A finding keeps the claim, the evidence for it, and its review state in one
+// row. Nothing here changes a Contact on its own — only an APPLIED finding
+// does, and applying is an act a person takes. That is the whole point: the
+// CRM should contain what somebody stands behind, not what a model inferred.
+// ---------------------------------------------------------------------------
+
+enum FindingKind {
+  interest // did they want the product
+  objection // what they pushed back on
+  next_action // what was agreed
+  intent // what they actually wanted
+  callback // a time they asked to be called
+}
+
+enum FindingState {
+  suggested // extracted, awaiting a human
+  applied // a person agreed; the contact was updated
+  dismissed // a person disagreed; never suggested again
+}
+
+model CallFinding {
+  id String @id @default(uuid())
+
+  callId String
+  call   Call   @relation(fields: [callId], references: [id], onDelete: Cascade)
+
+  /// Denormalised so a contact's findings can be listed without joining every
+  /// call. Nullable because a manual dial to an unknown number has no contact
+  /// until one is created.
+  contactId String?
+  contact   Contact? @relation(fields: [contactId], references: [id], onDelete: Cascade)
+
+  kind  FindingKind
+  /// The claim itself, in the engine's words.
+  value String
+
+  /// The words from the transcript that support the claim, when they could be
+  /// located. Null means the claim is unevidenced — which is not the same as
+  /// wrong, but is why it needs a person.
+  quote String?
+
+  /// True only when `quote` was found verbatim in Call.transcriptText.
+  /// A model that invents a quote fails this check, so a fabricated citation
+  /// cannot masquerade as evidence.
+  quoteVerified Boolean @default(false)
+
+  /// Set when the transcript contradicts the claim — an "interested" reading of
+  /// a call in which the customer plainly declined. Surfaced first for review,
+  /// because these are the ones that would do damage if applied blindly.
+  contradicted Boolean @default(false)
+
+  state FindingState @default(suggested)
+
+  reviewedById String?
+  reviewedBy   User?   @relation(fields: [reviewedById], references: [id], onDelete: SetNull)
+  reviewedAt   DateTime?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  /// One finding per kind per call: re-reconciling a call must update its
+  /// reading, not stack a second copy of it.
+  @@unique([callId, kind])
+  @@index([contactId, state])
+  @@index([state, contradicted])
 }

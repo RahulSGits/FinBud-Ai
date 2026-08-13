@@ -19,7 +19,7 @@
 // SQL would bucket calls by the *database session's* timezone, which is not the
 // same "day" the rest of the app means when it says `setHours(0, 0, 0, 0)`. A
 // single narrow projection bucketed in JS keeps one definition of a day.
-import { ContactStatus, LeadStatus, Prisma, Role, UserStatus } from '@prisma/client';
+import { CallStatus, ContactStatus, LeadStatus, Prisma, Role, UserStatus } from '@prisma/client';
 import { db } from '@/lib/db';
 
 export const DEFAULT_DAYS = 30;
@@ -101,6 +101,35 @@ export interface LeadStatusSlice {
   count: number;
 }
 
+/**
+ * Connect rate for one weekday / part-of-day cell.
+ *
+ * The question this answers is "when should we be dialling", so the measure is
+ * the share of attempts that reached a human — not raw volume, which mostly
+ * reflects when somebody happened to press Start.
+ */
+export interface TimeSlot {
+  /** 0 = Sunday, matching Date#getDay. */
+  weekday: number;
+  /** Index into SLOT_LABELS. */
+  slot: number;
+  calls: number;
+  connected: number;
+  /** Percentage, 0 when nothing was attempted in this cell. */
+  connectRate: number;
+}
+
+/** Where dials fall away, from attempt to finished conversation. */
+export interface FunnelStage {
+  key: 'attempted' | 'connected' | 'completed';
+  label: string;
+  count: number;
+  /** Share of the first stage. */
+  ofTotal: number;
+  /** Share of the stage immediately before, which is where drop-off shows. */
+  ofPrevious: number;
+}
+
 export interface AnalyticsPayload {
   days: number;
   from: string;
@@ -113,6 +142,10 @@ export interface AnalyticsPayload {
   byEmployee: EmployeeStat[];
   byAgent: AgentStat[];
   outcomes: OutcomeSlice[];
+  /** Connect rate by weekday and part of day. */
+  bestTime: TimeSlot[];
+  /** Attempted -> connected -> completed. */
+  funnel: FunnelStage[];
 }
 
 /**
@@ -544,6 +577,81 @@ async function computeEmployeeStats(
 // Company-wide (admin)
 // ---------------------------------------------------------------------------
 
+
+/** Part-of-day buckets, in the order they should read across a chart. */
+export const SLOT_LABELS = ['Morning 6–12', 'Afternoon 12–5', 'Evening 5–9', 'Night 9–12'] as const;
+
+/** Which bucket an hour falls in. Anything before 06:00 counts as night. */
+function slotOf(hour: number): number {
+  if (hour >= 6 && hour < 12) return 0;
+  if (hour >= 12 && hour < 17) return 1;
+  if (hour >= 17 && hour < 21) return 2;
+  return 3;
+}
+
+/**
+ * Connect rate by weekday and part of day.
+ *
+ * Answers "when should we be dialling" rather than "when did we dial", so the
+ * measure is the share of attempts that reached a human. Volume alone would
+ * only show when somebody happened to press Start.
+ *
+ * Every cell is emitted, including empty ones: a grid with holes in it reads as
+ * missing data, when the honest reading is "nothing was tried then".
+ */
+function bestTimeFrom(calls: { startedAt: Date; durationSec: number | null }[]): TimeSlot[] {
+  const grid = new Map<string, { calls: number; connected: number }>();
+  for (let weekday = 0; weekday < 7; weekday++) {
+    for (let slot = 0; slot < SLOT_LABELS.length; slot++) {
+      grid.set(`${weekday}:${slot}`, { calls: 0, connected: 0 });
+    }
+  }
+
+  for (const call of calls) {
+    const key = `${call.startedAt.getDay()}:${slotOf(call.startedAt.getHours())}`;
+    const cell = grid.get(key);
+    if (!cell) continue;
+    cell.calls++;
+    if ((call.durationSec ?? 0) > 0) cell.connected++;
+  }
+
+  const out: TimeSlot[] = [];
+  for (const [key, cell] of Array.from(grid.entries())) {
+    const [weekday, slot] = key.split(':').map(Number);
+    out.push({
+      weekday,
+      slot,
+      calls: cell.calls,
+      connected: cell.connected,
+      connectRate: cell.calls ? Math.round((cell.connected / cell.calls) * 1000) / 10 : 0,
+    });
+  }
+  return out.sort((a, b) => a.weekday - b.weekday || a.slot - b.slot);
+}
+
+/**
+ * Where dials fall away.
+ *
+ * `ofPrevious` is the number that matters: 86% of attempts connecting is a
+ * telephony story, while 86% of *connected* calls completing is a conversation
+ * story, and they need different fixes.
+ */
+function funnelFrom(totals: AnalyticsTotals, completed: number): FunnelStage[] {
+  const pct = (n: number, d: number) => (d ? Math.round((n / d) * 1000) / 10 : 0);
+  const attempted = totals.calls;
+  return [
+    { key: 'attempted', label: 'Attempted', count: attempted, ofTotal: 100, ofPrevious: 100 },
+    {
+      key: 'connected', label: 'Connected', count: totals.connected,
+      ofTotal: pct(totals.connected, attempted), ofPrevious: pct(totals.connected, attempted),
+    },
+    {
+      key: 'completed', label: 'Completed', count: completed,
+      ofTotal: pct(completed, attempted), ofPrevious: pct(completed, totals.connected),
+    },
+  ];
+}
+
 export async function computeAnalytics(query: AnalyticsQuery): Promise<AnalyticsPayload> {
   const now = new Date();
   const from = rangeStart(now, query.days);
@@ -552,7 +660,7 @@ export async function computeAnalytics(query: AnalyticsQuery): Promise<Analytics
   if (query.agentId) base.push({ agentId: query.agentId });
   if (query.employeeId) base.push(attributedTo(query.employeeId));
 
-  const [core, agentAgg, byEmployee, agents] = await Promise.all([
+  const [core, agentAgg, byEmployee, agents, timing, completedCount] = await Promise.all([
     computeCore(base, from, query.days),
     aggregateByAgent(base),
     computeEmployeeStats(base, from, query.employeeId),
@@ -561,6 +669,10 @@ export async function computeAnalytics(query: AnalyticsQuery): Promise<Analytics
       orderBy: { name: 'asc' },
       select: { id: true, name: true, isActive: true },
     }),
+    // Timestamps only — the heatmap needs when each call ran and whether it
+    // connected, not the call itself.
+    db.call.findMany({ where: { AND: base }, select: { startedAt: true, durationSec: true } }),
+    db.call.count({ where: { AND: [...base, { status: CallStatus.completed }] } }),
   ]);
 
   return {
@@ -575,6 +687,8 @@ export async function computeAnalytics(query: AnalyticsQuery): Promise<Analytics
     byEmployee,
     byAgent: toAgentStats(agents, agentAgg),
     outcomes: core.outcomes,
+    bestTime: bestTimeFrom(timing),
+    funnel: funnelFrom(core.totals, completedCount),
   };
 }
 
