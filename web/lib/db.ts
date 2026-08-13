@@ -16,18 +16,89 @@ const globalForPrisma = globalThis as unknown as { prisma: PrismaClient };
  * size 15, 200 max clients) and collapses those waves into one. An explicit
  * value in the URL always wins — this only fills in what is missing.
  */
+/**
+ * Repair a connection string whose password was pasted without encoding.
+ *
+ * A Postgres password is very often generated with characters that are
+ * structural in a URL. Unencoded, `@` ends the userinfo section early — so
+ * `postgres://u:p@ss@host/db` has a host of `ss` — and `#` opens a fragment
+ * that silently swallows the port and database. The string still *looks*
+ * right, which is what makes it cost hours: the app reports the database as
+ * unreachable while the database is perfectly healthy.
+ *
+ * Encoding it by hand is the textbook answer and it kept not happening, so the
+ * string is repaired here instead. The rule is unambiguous because a host can
+ * never contain an `@`: whatever precedes the LAST `@` is userinfo, whatever
+ * follows is the host. Splitting there recovers the password however many `@`
+ * it contains.
+ *
+ * Only touched when it is already broken. A string that parses to a plausible
+ * host is passed through untouched, so a correctly encoded password is never
+ * double-encoded into nonsense.
+ */
+export function repairConnectionString(raw: string): string {
+  const scheme = raw.match(/^([a-z][a-z0-9+.-]*:\/\/)/i);
+  if (!scheme) return raw;
+
+  const rest = raw.slice(scheme[1].length);
+
+  // A host can never contain an `@`, so the last one is always the boundary —
+  // true no matter how many the password holds. Never derive this from URL
+  // parsing: a `#` earlier in the password truncates the string at that point,
+  // which is what makes the host come out as a fragment of the password.
+  const at = rest.lastIndexOf('@');
+  if (at < 0) return raw; // no credentials at all
+
+  const userinfo = rest.slice(0, at);
+  const hostAndPath = rest.slice(at + 1);
+
+  // First colon only: everything after it is the password, colons included.
+  const colon = userinfo.indexOf(':');
+  if (colon < 0) return raw; // a user with no password needs no repair
+
+  const user = userinfo.slice(0, colon);
+  const password = userinfo.slice(colon + 1);
+  if (!password) return raw;
+
+  // Only act on characters that are structural in a URL and are sitting there
+  // raw. A password that is already percent-encoded contains none of these, so
+  // it is returned untouched and can never be double-encoded.
+  if (!/[@#?/[\]]/.test(password)) return raw;
+
+  // Decode first so a partly-encoded password does not end up doubly escaped;
+  // a stray `%` is not valid encoding, so fall back to the literal text.
+  let plain = password;
+  try {
+    plain = decodeURIComponent(password);
+  } catch {
+    /* not encoded — use it as typed */
+  }
+
+  return `${scheme[1]}${user}:${encodeURIComponent(plain)}@${hostAndPath}`;
+}
+
 function tunedUrl(): string | undefined {
   const raw = process.env.DATABASE_URL;
   if (!raw) return undefined;
 
+  const repaired = repairConnectionString(raw);
+  if (repaired !== raw) {
+    console.warn(
+      '[db] DATABASE_URL contained an unencoded password and was repaired in memory. ' +
+        'Percent-encode it in your environment variables so tooling that reads it directly ' +
+        '(prisma migrate, psql) works too.'
+    );
+  }
+
   try {
-    const url = new URL(raw);
+    const url = new URL(repaired);
     if (!url.searchParams.has('connection_limit')) url.searchParams.set('connection_limit', '10');
     if (!url.searchParams.has('pool_timeout')) url.searchParams.set('pool_timeout', '20');
     return url.toString();
   } catch {
-    // Unparseable URLs are Prisma's problem to report, not ours to mangle.
-    return raw;
+    // Unparseable even after repair — Prisma's problem to report, not ours to
+    // mangle further.
+    return repaired;
   }
 }
 
