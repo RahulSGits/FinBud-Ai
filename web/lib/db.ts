@@ -85,6 +85,39 @@ export function dbUnreachableMessage(): string {
     /* unparseable or unset — the generic message covers it */
   }
 
+  // 0. A password containing URL-reserved characters, pasted unencoded.
+  //
+  // Checked before the deployment branch because it is equally wrong locally,
+  // and because it is invisible: the string *looks* like a correct connection
+  // string. An unencoded `@` ends the userinfo section early, so everything
+  // after it is read as the host — `…:p@ss@host:5432/db` resolves to a host of
+  // `ss`, and Postgres is dialled at an address that does not exist. A `#`
+  // starts a URL fragment and silently discards the rest, port and database
+  // included.
+  //
+  // Cost a production outage here, twice, and the generic message sent the
+  // reader off to check the database instead of the string.
+  const raw = process.env.DATABASE_URL ?? '';
+  const afterScheme = raw.replace(/^[a-z+]+:\/\//i, '');
+  const userinfo = afterScheme.split('@').slice(0, -1).join('@');
+  const looksMangled =
+    // More than one `@` before the host means one of them is inside the password.
+    afterScheme.split('@').length > 2 ||
+    // A `#` anywhere truncates the URL at that point.
+    raw.includes('#') ||
+    // A host that is bare digits is the classic symptom of the split above.
+    /^\d+$/.test(host);
+
+  if (raw && looksMangled) {
+    return (
+      'The database is unreachable: DATABASE_URL cannot be parsed, which almost always means the ' +
+      'password contains characters that are special in a URL. Percent-encode them — @ becomes ' +
+      '%40, # becomes %23, $ becomes %24, / becomes %2F — or the address after the password is ' +
+      `read as the hostname${host ? ` (it currently parses to "${host}")` : ''}. Update DATABASE_URL ` +
+      'and DIRECT_URL in your deployment environment variables, then redeploy.'
+    );
+  }
+
   const deployed = !!process.env.VERCEL || process.env.NODE_ENV === 'production';
   if (!deployed) {
     return 'The database is unreachable. Check DATABASE_URL, and that the database is running.';
