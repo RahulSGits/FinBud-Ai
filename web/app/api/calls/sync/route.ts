@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { Role } from '@prisma/client';
 import { getCurrentUser } from '@/lib/auth';
 import { reconcileInFlightCalls } from '@/lib/calls/reconcile';
+import { republishStaleAgents } from '@/lib/providers/sync';
 
 export const dynamic = 'force-dynamic';
 export const maxDuration = 60;
@@ -38,6 +39,25 @@ async function sync(req: NextRequest) {
   if (!who) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
 
   try {
+    // Republish before reconciling, on the same pass.
+    //
+    // Changing the provider API key invalidates every stored agent id. That was
+    // already repaired lazily on the next dial, which is correct but invisible:
+    // until somebody calls, the agents page reads "being republished" and the
+    // provider's dashboard shows nothing, which is indistinguishable from a
+    // fault. Doing it here means a key change heals on the schedule instead.
+    //
+    // Only schedulers and admins trigger it — an employee polling their lead
+    // list should not be publishing agents — and a failure here must not cost
+    // the reconcile that follows.
+    const republished =
+      who === 'employee'
+        ? null
+        : await republishStaleAgents().catch((e) => {
+            console.error('[calls/sync] republish failed:', e);
+            return null;
+          });
+
     const { checked, updated, completed, errors, results } = await reconcileInFlightCalls();
 
     return NextResponse.json({
@@ -46,6 +66,9 @@ async function sync(req: NextRequest) {
       updated,
       completed,
       errors,
+      ...(republished && (republished.rotated || republished.published.length || republished.failed.length)
+        ? { republished }
+        : {}),
       // Per-call detail names every call in flight across the company, with the
       // provider id it is keyed by. An employee session may *drive* the sync
       // (their own campaign needs it), but only schedulers and admins get the

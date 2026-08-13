@@ -84,6 +84,63 @@ export async function syncAgent(agentId: string): Promise<SyncResult> {
   }
 }
 
+export interface RepublishResult {
+  /** True when a changed credential was detected on this pass. */
+  rotated: boolean;
+  published: { id: string; name: string; externalAgentId: string }[];
+  failed: { id: string; name: string; error: string }[];
+}
+
+/**
+ * Publish every agent the provider does not currently know about.
+ *
+ * Rotating an API key invalidates every stored agent id, and republishing used
+ * to be lazy: it happened on the next dial. That is fine for correctness and
+ * poor for confidence — the agents page sits there saying "being republished"
+ * and the provider's own dashboard stays empty until somebody happens to place
+ * a call, which looks exactly like something being broken.
+ *
+ * Running this on the schedule closes that gap. It is safe to call repeatedly:
+ * ensureAccountCurrent only clears ids when the credential has actually
+ * changed, and an agent that already has an id is skipped, so the steady-state
+ * cost is one Setting read plus one indexed query.
+ */
+export async function republishStaleAgents(providerId?: string): Promise<RepublishResult> {
+  const provider = getProvider(providerId);
+  const result: RepublishResult = { rotated: false, published: [], failed: [] };
+
+  // Nothing to publish for engines that carry their config with each call, and
+  // nothing to talk to when the credentials are absent.
+  if (!provider.capabilities().serverAgents || isMockMode()) return result;
+  if (!(await provider.isConfigured())) return result;
+
+  const check = await ensureAccountCurrent(provider.id).catch(() => null);
+  result.rotated = !!check?.rotated;
+
+  const pending = await db.agent.findMany({
+    where: { voiceProvider: provider.id, externalAgentId: null },
+    select: { id: true, name: true },
+  });
+  if (!pending.length) return result;
+
+  for (const agent of pending) {
+    const sync = await syncAgent(agent.id);
+    if (sync.synced && sync.externalAgentId) {
+      result.published.push({ id: agent.id, name: agent.name, externalAgentId: sync.externalAgentId });
+    } else {
+      result.failed.push({ id: agent.id, name: agent.name, error: sync.error ?? 'sync failed' });
+    }
+  }
+
+  if (result.published.length) {
+    console.warn(
+      `[sync] republished ${result.published.length} agent(s) to ${provider.name}` +
+        (result.rotated ? ' after a credential change' : '')
+    );
+  }
+  return result;
+}
+
 /** Best-effort removal from the provider before local deletion. */
 export async function unsyncAgent(agent: { voiceProvider: string; externalAgentId: string | null }): Promise<void> {
   const provider = getProvider(agent.voiceProvider);

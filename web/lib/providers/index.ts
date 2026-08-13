@@ -75,9 +75,23 @@ export async function listProviders(): Promise<
  * secret to rotate is one fewer that gets missed.
  */
 export function webhookUrlFor(providerId: string): string | null {
+  // Order matters, and the middle one is the fix for a subtle bug.
+  //
+  // VERCEL_URL is the *deployment's* own hostname — a new one on every push. A
+  // webhook registered against it points at one specific build, so the next
+  // deploy silently orphans it and results stop arriving with nothing to show
+  // why. VERCEL_PROJECT_PRODUCTION_URL is the project's stable production
+  // domain and is set even in preview builds, which is exactly what a callback
+  // registered with a third party needs. VERCEL_URL stays only as a last
+  // resort, for a preview with no production domain yet.
+  const configured = process.env.NEXT_PUBLIC_APP_URL?.trim();
+  const stable = process.env.VERCEL_PROJECT_PRODUCTION_URL;
+  const deployment = process.env.VERCEL_URL;
+
   const base =
-    process.env.NEXT_PUBLIC_APP_URL ||
-    (process.env.VERCEL_URL ? `https://${process.env.VERCEL_URL}` : null);
+    configured ||
+    (stable ? `https://${stable}` : null) ||
+    (deployment ? `https://${deployment}` : null);
   if (!base) return null;
 
   const url = `${base.replace(/\/$/, '')}/api/webhooks/${providerId}`;
