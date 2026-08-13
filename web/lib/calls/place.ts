@@ -88,6 +88,26 @@ export async function placeCall(opts: {
     );
   }
 
+  // Notice a rotated API key BEFORE looking at the stored agent id.
+  //
+  // Provider-side ids belong to the account that issued them, so changing the
+  // key turns every stored id into a 404. ensureAccountCurrent drops those ids
+  // so the branch below republishes — but it used to run only inside syncAgent,
+  // which this function calls only when there is NO id. An agent that still
+  // held a stale one therefore dialled straight through and came back
+  // "Agent not found or access denied", with the operator left to work out
+  // that a key change was the cause. One Setting read closes that hole.
+  let dialAgent = agent;
+  if (!isMockMode() && provider.capabilities().serverAgents) {
+    const { ensureAccountCurrent } = await import('../providers/account');
+    // Only re-read when something was actually cleared; the common case is a
+    // single Setting lookup and no extra query.
+    const check = await ensureAccountCurrent(provider.id).catch(() => null);
+    if (check?.rotated) {
+      dialAgent = (await db.agent.findUnique({ where: { id: agent.id } })) ?? agent;
+    }
+  }
+
   // Engines with a server-side agent resource cannot dial one they have never
   // been told about. That is the normal state for every agent authored while
   // USE_MOCK_CALLS was true — sync is skipped in mock mode — so the first real
@@ -95,8 +115,7 @@ export async function placeCall(opts: {
   // and stay broken until someone happened to re-save the agent. Sync on
   // demand instead, and report the sync failure rather than a dial failure,
   // because that is the thing that actually needs fixing.
-  let dialAgent = agent;
-  if (!isMockMode() && provider.capabilities().serverAgents && !agent.externalAgentId) {
+  if (!isMockMode() && provider.capabilities().serverAgents && !dialAgent.externalAgentId) {
     const { syncAgent } = await import('../providers/sync');
     const sync = await syncAgent(agent.id);
     if (!sync.synced || !sync.externalAgentId) {
@@ -129,11 +148,11 @@ export async function placeCall(opts: {
     },
   });
 
-  try {
-    const result = await provider.startCall({
+  const dispatch = (a: typeof dialAgent) =>
+    provider.startCall({
       to: contact.phone,
-      externalAgentId: dialAgent.externalAgentId,
-      config: agentToConfig(dialAgent),
+      externalAgentId: a.externalAgentId,
+      config: agentToConfig(a),
       metadata: {
         callLogId: call.id,
         agentId: agent.id,
@@ -142,6 +161,43 @@ export async function placeCall(opts: {
         customerName: contact.name,
       },
     });
+
+  try {
+    let result;
+    try {
+      result = await dispatch(dialAgent);
+    } catch (err: any) {
+      // Second line of defence for a stale provider-side id.
+      //
+      // The fingerprint check above catches a key rotation, but it cannot catch
+      // an agent deleted on the provider's dashboard, or an id that went stale
+      // some other way. Both surface identically here — "agent not found or
+      // access denied" — and both are fixed by republishing. Matched on the
+      // body rather than err.status because adapters map upstream codes onto
+      // their own (OmniDimension's 404 can arrive as a 502).
+      const text = `${err?.message ?? ''} ${err?.detail ?? ''}`;
+      if (!dialAgent.externalAgentId || !/\(404\)|not[ _]?found|access denied|does not exist/i.test(text)) {
+        throw err;
+      }
+
+      console.warn(`[call] ${agent.name}: provider does not know id ${dialAgent.externalAgentId}; republishing and retrying once.`);
+      await db.agent.update({
+        where: { id: agent.id },
+        data: { externalAgentId: null, syncedAt: null },
+      });
+      const { syncAgent } = await import('../providers/sync');
+      const resync = await syncAgent(agent.id);
+      if (!resync.synced || !resync.externalAgentId) {
+        throw new CallError(
+          `Not dispatched: "${agent.name}" is unknown to ${provider.name} and could not be republished. ${resync.error ?? ''}`.trim(),
+          502
+        );
+      }
+      dialAgent = (await db.agent.findUnique({ where: { id: agent.id } })) ?? dialAgent;
+      // Exactly one retry: if the freshly published id is also rejected, the
+      // problem is not staleness and looping would only cost time.
+      result = await dispatch(dialAgent);
+    }
 
     await db.call.update({
       where: { id: call.id },

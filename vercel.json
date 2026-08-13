@@ -6,6 +6,10 @@
     {
       "path": "/api/campaigns/tick",
       "schedule": "30 3 * * *"
+    },
+    {
+      "path": "/api/calls/sync",
+      "schedule": "0 4 * * *"
     }
   ]
 }
