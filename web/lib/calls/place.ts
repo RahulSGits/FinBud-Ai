@@ -253,7 +253,16 @@ async function resolveManualContact(
   phone: string,
   name: string | null
 ): Promise<{ contactId: string; created: boolean }> {
-  const existing = await db.contact.findUnique({ where: { phone } });
+  // Scoped to the caller's company: a number another company already holds is
+  // not this company's lead, and must resolve to a new row rather than reaching
+  // across the tenant boundary.
+  const companyId = user.companyId;
+  if (!companyId) {
+    throw new CallError('Select a company before placing a call.', 400);
+  }
+  const existing = await db.contact.findUnique({
+    where: { companyId_phone: { companyId, phone } },
+  });
 
   if (existing) {
     // Checked ahead of ownership on purpose. A do-not-call number must read as
@@ -287,6 +296,7 @@ async function resolveManualContact(
   const fresh = await db.contact.create({
     data: {
       phone,
+      companyId,
       name,
       // An employee's own manual dial has to land in their lead list — an
       // unassigned contact is invisible to the person who just created it, and

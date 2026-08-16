@@ -17,7 +17,10 @@ export function ChangePasswordForm({
 }: {
   forced: boolean;
   userName: string;
-  role: 'admin' | 'employee';
+  /// Decides where to land after the change. Widened to the full Role enum:
+  /// a role missing from this union was a compile error waiting for whoever
+  /// added one.
+  role: 'super_admin' | 'admin' | 'manager' | 'employee' | 'viewer';
 }) {
   const router = useRouter();
   const [current, setCurrent] = useState('');
@@ -50,7 +53,9 @@ export function ChangePasswordForm({
     }
 
     // Cleared mustChangePassword server-side; land on the right dashboard.
-    router.push(role === 'admin' ? '/admin' : '/dashboard');
+    // Anyone who administers something lands on the admin surface; everyone
+    // else on their own dashboard.
+    router.push(role === 'super_admin' || role === 'admin' ? '/admin' : '/dashboard');
     router.refresh();
   }
 

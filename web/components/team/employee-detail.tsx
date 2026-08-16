@@ -13,7 +13,14 @@ import type { LucideIcon } from 'lucide-react';
 import { toast } from 'sonner';
 import { cn } from '@/lib/utils';
 
-export type EmployeeRole = 'admin' | 'employee';
+/// Mirrors the Prisma Role enum. Widened from the original two so a role
+/// added to the schema cannot silently fall through a lookup table here.
+export type EmployeeRole =
+  | 'super_admin'
+  | 'admin'
+  | 'manager'
+  | 'employee'
+  | 'viewer';
 export type EmployeeStatus = 'invited' | 'active' | 'disabled';
 
 export interface EmployeeProfile {

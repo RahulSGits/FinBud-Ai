@@ -12,7 +12,14 @@ import { toast } from 'sonner';
 import { InviteMember } from '@/components/team/invite-member';
 import { cn } from '@/lib/utils';
 
-export type MemberRole = 'admin' | 'employee';
+/// Mirrors the Prisma Role enum. Widened from the original two so a role
+/// added to the schema cannot silently fall through a lookup table here.
+export type MemberRole =
+  | 'super_admin'
+  | 'admin'
+  | 'manager'
+  | 'employee'
+  | 'viewer';
 export type MemberStatus = 'invited' | 'active' | 'disabled';
 
 export interface TeamMember {
@@ -48,8 +55,14 @@ const STATUS_TONE: Record<MemberStatus, string> = {
 };
 
 const ROLE_TONE: Record<MemberRole, string> = {
+  // The platform owner reads as distinct from a company's own administrator,
+  // because confusing the two is exactly the mistake worth preventing on a
+  // screen where somebody hands out access.
+  super_admin: 'bg-violet-100 dark:bg-violet-500/10 text-violet-700 dark:text-violet-400',
   admin: 'bg-indigo-100 dark:bg-indigo-500/10 text-indigo-700 dark:text-indigo-400',
+  manager: 'bg-sky-100 dark:bg-sky-500/10 text-sky-700 dark:text-sky-400',
   employee: 'bg-slate-100 dark:bg-white/5 text-slate-600 dark:text-slate-400',
+  viewer: 'bg-slate-100 dark:bg-white/5 text-slate-500 dark:text-slate-500',
 };
 
 function relative(iso: string | null): string {

@@ -21,8 +21,27 @@ datasource db {
 // ---------------------------------------------------------------------------
 
 enum Role {
+  /// The platform owner. Belongs to no company and sees across all of them.
+  /// Deliberately a role rather than a flag, so one authorisation path covers
+  /// every caller instead of two that can disagree.
+  super_admin
+  /// Company administrator. Kept as `admin` rather than renamed to
+  /// COMPANY_ADMIN: every existing guard compares against this value, and a
+  /// rename is a breaking migration bought for nothing.
   admin
+  manager
+  /// The calling agent. Kept as `employee` for the same reason as `admin`.
   employee
+  viewer
+}
+
+/// Where a company is in its life on the platform.
+enum CompanyStatus {
+  /// Requested access, not yet approved. Cannot sign in.
+  pending
+  active
+  /// Suspended by the platform owner — data retained, access refused.
+  suspended
 }
 
 enum UserStatus {
@@ -31,14 +50,113 @@ enum UserStatus {
   disabled
 }
 
+// ---------------------------------------------------------------------------
+// The tenant.
+//
+// Every row that belongs to somebody hangs off this. The platform owner
+// (Role.super_admin) has no company and sees across all of them; everyone else
+// has exactly one, derived from their session and never from the request.
+//
+// Isolation is not a filter that each route remembers to apply. lib/authz.ts
+// builds the where-fragments and every query composes them, so a new route that
+// forgets is a route that returns nothing rather than a route that leaks.
+// ---------------------------------------------------------------------------
+model Company {
+  id   String @id @default(uuid())
+  name String
+
+  /// URL-safe handle, for a per-company sign-in path or subdomain later.
+  slug String @unique
+
+  status CompanyStatus @default(pending)
+
+  // --- who asked, kept from the access request so approval has context -----
+  contactName  String?
+  contactEmail String?
+  contactPhone String?
+  /// Free text from the access request — what they said they needed.
+  requestNotes String?
+
+  // --- branding -------------------------------------------------------------
+  /// Applied as CSS custom properties at render, so a company's colours reach
+  /// every component without any of them naming a colour.
+  theme    Json?
+  logoUrl  String?
+
+  // --- limits ---------------------------------------------------------------
+  /// Null means "no ceiling". Nullable rather than a sentinel number so
+  /// "unlimited" cannot be confused with "zero", which is the failure mode that
+  /// silently blocks a paying customer.
+  maxUsers        Int?
+  maxAgents       Int?
+  maxCampaigns    Int?
+  maxContacts     Int?
+  maxCallsPerDay  Int?
+  maxCallMinutes  Int?
+  maxConcurrent   Int?
+
+  /// Plan label. Free text for now: the plan catalogue is a later phase, and a
+  /// foreign key to a table that does not exist yet would block this one.
+  plan String?
+
+  // --- per-company provider credentials -------------------------------------
+  /// A company's own OmniDimension key, encrypted at rest. Null falls back to
+  /// the platform key, which is how the founding company keeps working
+  /// unchanged through this migration.
+  omnidimApiKeyEnc String?
+  /// The number their calls dial from, once they import one.
+  fromNumberId     String?
+
+  approvedAt DateTime?
+  createdAt  DateTime  @default(now())
+  updatedAt  DateTime  @updatedAt
+
+  users            User[]
+  invites          Invite[]
+  agents           Agent[]
+  contacts         Contact[]
+  campaigns        Campaign[]
+  calls            Call[]
+  notes            Note[]
+  documents        Document[]
+  messageTemplates MessageTemplate[]
+  messages         Message[]
+  auditLogs        AuditLog[]
+  findings         CallFinding[]
+  settings         CompanySetting[]
+
+  @@index([status])
+}
+
+/// Per-company key/value settings.
+///
+/// The existing global `Setting` table stays for platform-wide values. This is
+/// its tenant-scoped twin — the provider credential fingerprint, for one, is
+/// per-account and therefore per-company once each brings its own key.
+model CompanySetting {
+  companyId String
+  company   Company @relation(fields: [companyId], references: [id], onDelete: Cascade)
+
+  key       String
+  value     Json
+  updatedAt DateTime @updatedAt
+
+  @@id([companyId, key])
+}
+
 model User {
+
+  /// The tenant this row belongs to. Nullable only until the backfill has
+  /// run; every write path sets it.
+  companyId String?
+  tenant    Company? @relation(fields: [companyId], references: [id], onDelete: Cascade)
   id    String @id @default(uuid())
   email String @unique
   name  String
 
   /// Company employee number. Optional, but unique when set — staff sign in
   /// with either this or their email address.
-  employeeId String?    @unique
+  employeeId String?
   role       Role       @default(employee)
   status     UserStatus @default(invited)
 
@@ -76,11 +194,22 @@ model User {
   findingsReviewed CallFinding[]
 
   @@index([role, status])
+
+  /// Employee ids are assigned per company, so FB-001 exists in every one of
+  /// them. Globally unique would make the second company unable to number
+  /// its own staff.
+  @@unique([companyId, employeeId])
+  @@index([companyId, role])
 }
 
 /// A pending invitation. The raw token is emailed via Resend and never stored —
 /// only its hash, so a database leak cannot be used to claim accounts.
 model Invite {
+
+  /// The tenant this row belongs to. Nullable only until the backfill has
+  /// run; every write path sets it.
+  companyId String?
+  tenant    Company? @relation(fields: [companyId], references: [id], onDelete: Cascade)
   id        String   @id @default(uuid())
   email     String
   role      Role     @default(employee)
@@ -102,6 +231,11 @@ model Invite {
 // ---------------------------------------------------------------------------
 
 model Agent {
+
+  /// The tenant this row belongs to. Nullable only until the backfill has
+  /// run; every write path sets it.
+  companyId String?
+  tenant    Company? @relation(fields: [companyId], references: [id], onDelete: Cascade)
   id          String  @id @default(uuid())
   name        String
   description String?
@@ -199,6 +333,11 @@ enum ContactStatus {
 }
 
 model Contact {
+
+  /// The tenant this row belongs to. Nullable only until the backfill has
+  /// run; every write path sets it.
+  companyId String?
+  tenant    Company? @relation(fields: [companyId], references: [id], onDelete: Cascade)
   id      String  @id @default(uuid())
   name    String?
   phone   String
@@ -232,9 +371,12 @@ model Contact {
   messages Message[]
   findings CallFinding[]
 
-  /// One row per phone number — re-importing a sheet updates rather than
-  /// duplicating, which is the most common data-quality problem here.
-  @@unique([phone])
+  /// One row per phone number PER COMPANY. Globally unique would mean the
+  /// first tenant to import a lead permanently blocks every other tenant from
+  /// holding it — and two companies calling the same person is ordinary. The
+  /// re-import-updates-rather-than-duplicates behaviour this was written for
+  /// still holds, now scoped to the owner.
+  @@unique([companyId, phone])
   @@index([status, nextAttemptAt])
   @@index([assignedToId])
   @@index([campaignId])
@@ -253,6 +395,11 @@ enum CampaignStatus {
 }
 
 model Campaign {
+
+  /// The tenant this row belongs to. Nullable only until the backfill has
+  /// run; every write path sets it.
+  companyId String?
+  tenant    Company? @relation(fields: [companyId], references: [id], onDelete: Cascade)
   id     String         @id @default(uuid())
   name   String
   status CampaignStatus @default(draft)
@@ -308,6 +455,11 @@ enum LeadStatus {
 }
 
 model Call {
+
+  /// The tenant this row belongs to. Nullable only until the backfill has
+  /// run; every write path sets it.
+  companyId String?
+  tenant    Company? @relation(fields: [companyId], references: [id], onDelete: Cascade)
   id        String @id @default(uuid())
   phone     String
   direction String @default("outbound")
@@ -368,6 +520,11 @@ model Call {
 
 /// Employee follow-up: free-text notes and scheduled callbacks.
 model Note {
+
+  /// The tenant this row belongs to. Nullable only until the backfill has
+  /// run; every write path sets it.
+  companyId String?
+  tenant    Company? @relation(fields: [companyId], references: [id], onDelete: Cascade)
   id   String @id @default(uuid())
   body String
 
@@ -401,6 +558,11 @@ enum DocumentStatus {
 }
 
 model Document {
+
+  /// The tenant this row belongs to. Nullable only until the backfill has
+  /// run; every write path sets it.
+  companyId String?
+  tenant    Company? @relation(fields: [companyId], references: [id], onDelete: Cascade)
   id          String         @id @default(uuid())
   name        String
   mimeType    String
@@ -462,6 +624,11 @@ enum MessageStatus {
 /// supported set. Templates are stored rather than hardcoded so staff can add
 /// and edit their own follow-ups without a deploy.
 model MessageTemplate {
+
+  /// The tenant this row belongs to. Nullable only until the backfill has
+  /// run; every write path sets it.
+  companyId String?
+  tenant    Company? @relation(fields: [companyId], references: [id], onDelete: Cascade)
   id   String @id @default(uuid())
   name String
   body String
@@ -489,6 +656,11 @@ model MessageTemplate {
 /// and the record of what was actually sent to a customer must not change
 /// retroactively.
 model Message {
+
+  /// The tenant this row belongs to. Nullable only until the backfill has
+  /// run; every write path sets it.
+  companyId String?
+  tenant    Company? @relation(fields: [companyId], references: [id], onDelete: Cascade)
   id   String @id @default(uuid())
   to   String
   body String
@@ -533,6 +705,11 @@ model Setting {
 }
 
 model AuditLog {
+
+  /// The tenant this row belongs to. Nullable only until the backfill has
+  /// run; every write path sets it.
+  companyId String?
+  tenant    Company? @relation(fields: [companyId], references: [id], onDelete: Cascade)
   id       String  @id @default(uuid())
   action   String
   entity   String
@@ -578,6 +755,11 @@ enum FindingState {
 }
 
 model CallFinding {
+
+  /// The tenant this row belongs to. Nullable only until the backfill has
+  /// run; every write path sets it.
+  companyId String?
+  tenant    Company? @relation(fields: [companyId], references: [id], onDelete: Cascade)
   id String @id @default(uuid())
 
   callId String

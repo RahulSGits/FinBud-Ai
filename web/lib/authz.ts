@@ -21,13 +21,59 @@
 import { Prisma, Role } from '@prisma/client';
 import { AuthError, type SessionUser } from './auth';
 
+/** The platform owner. Belongs to no company and sees across all of them. */
+export function isSuperAdmin(user: SessionUser): boolean {
+  return user.role === Role.super_admin;
+}
+
+/**
+ * Administrator of their own company.
+ *
+ * A super admin counts, so every screen an admin can reach the platform owner
+ * can reach too — without a second branch in each handler that could disagree
+ * with this one.
+ */
 export function isAdmin(user: SessionUser): boolean {
-  return user.role === Role.admin;
+  return user.role === Role.admin || user.role === Role.super_admin;
 }
 
 /** Throwing guard for handlers that have already resolved a user. */
 export function assertAdmin(user: SessionUser): void {
   if (!isAdmin(user)) throw new AuthError('Forbidden', 403);
+}
+
+/** Platform-owner-only guard, for the Super Admin surface. */
+export function assertSuperAdmin(user: SessionUser): void {
+  if (!isSuperAdmin(user)) throw new AuthError('Forbidden', 403);
+}
+
+// ---------------------------------------------------------------------------
+// Tenant isolation
+//
+// This is the part that must never be forgotten, so it is not left to memory:
+// every scope below composes `tenant(user)`, and none of them returns `{}` any
+// more. That distinction is the whole security boundary — before tenancy an
+// admin's scope was `{}` meaning "the whole table", and the same `{}` under
+// tenancy means "every company's rows".
+//
+// The failure mode is chosen deliberately. A company id that is missing yields
+// a filter that matches NOTHING rather than everything, so a bug shows up as a
+// user who cannot see their own data — loud, immediate, harmless — instead of
+// one who can see somebody else's.
+// ---------------------------------------------------------------------------
+
+/**
+ * The tenant clause for this user.
+ *
+ * Only a super admin gets `{}`. For anyone else the company comes from their
+ * session row, never from the request, so a forged `companyId` in a payload or
+ * query string cannot widen what they see.
+ */
+export function tenant(user: SessionUser): { companyId?: string } {
+  if (isSuperAdmin(user)) return {};
+  // An impossible id rather than `{}`: a user with no company must match no
+  // rows. Returning an empty filter here would hand them the entire platform.
+  return { companyId: user.companyId ?? '__no_company__' };
 }
 
 // ---------------------------------------------------------------------------
@@ -42,24 +88,24 @@ export function assertAdmin(user: SessionUser): void {
  * one to dial with) plus their own drafts, which nobody else should see yet.
  */
 export function visibleAgents(user: SessionUser): Prisma.AgentWhereInput {
-  if (isAdmin(user)) return {};
-  return { OR: [{ isActive: true }, { createdById: user.id }] };
+  if (isAdmin(user)) return tenant(user);
+  return { ...tenant(user), OR: [{ isActive: true }, { createdById: user.id }] };
 }
 
 /** Agents an employee may edit or delete: only ones they authored. */
 export function editableAgents(user: SessionUser): Prisma.AgentWhereInput {
-  if (isAdmin(user)) return {};
-  return { createdById: user.id };
+  if (isAdmin(user)) return tenant(user);
+  return { ...tenant(user), createdById: user.id };
 }
 
 export function visibleCampaigns(user: SessionUser): Prisma.CampaignWhereInput {
-  if (isAdmin(user)) return {};
-  return { createdById: user.id };
+  if (isAdmin(user)) return tenant(user);
+  return { ...tenant(user), createdById: user.id };
 }
 
 export function visibleContacts(user: SessionUser): Prisma.ContactWhereInput {
-  if (isAdmin(user)) return {};
-  return { assignedToId: user.id };
+  if (isAdmin(user)) return tenant(user);
+  return { ...tenant(user), assignedToId: user.id };
 }
 
 /**
@@ -68,8 +114,11 @@ export function visibleContacts(user: SessionUser): Prisma.ContactWhereInput {
  * still their own record.
  */
 export function visibleCalls(user: SessionUser): Prisma.CallWhereInput {
-  if (isAdmin(user)) return {};
-  return { OR: [{ contact: { assignedToId: user.id } }, { startedById: user.id }] };
+  if (isAdmin(user)) return tenant(user);
+  return {
+    ...tenant(user),
+    OR: [{ contact: { assignedToId: user.id } }, { startedById: user.id }],
+  };
 }
 
 // ---------------------------------------------------------------------------
@@ -87,6 +136,8 @@ export function assertOwner(
   ownerId: string | null | undefined,
   what: string
 ): void {
+  // Company membership is checked by the caller's scoped read — this only
+  // answers "may this person change something inside their own company".
   if (isAdmin(user)) return;
   if (ownerId !== user.id) {
     throw new AuthError(`You can only change ${what} you created.`, 403);

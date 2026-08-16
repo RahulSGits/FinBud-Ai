@@ -21,8 +21,11 @@ export const dynamic = 'force-dynamic';
 const DAY_MS = 24 * 60 * 60 * 1000;
 
 const ROLE_TONE: Record<Role, string> = {
+  super_admin: 'bg-violet-100 dark:bg-violet-500/10 text-violet-700 dark:text-violet-400',
   admin: 'bg-indigo-100 dark:bg-indigo-500/10 text-indigo-700 dark:text-indigo-400',
+  manager: 'bg-sky-100 dark:bg-sky-500/10 text-sky-700 dark:text-sky-400',
   employee: 'bg-slate-100 dark:bg-white/5 text-slate-600 dark:text-slate-400',
+  viewer: 'bg-slate-100 dark:bg-white/5 text-slate-500 dark:text-slate-500',
 };
 
 const STATUS_TONE: Record<UserStatus, string> = {

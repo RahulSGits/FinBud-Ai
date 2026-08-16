@@ -97,6 +97,16 @@ export interface SessionUser {
   email: string;
   name: string;
   role: Role;
+  /**
+   * The tenant this user belongs to. Null only for a super admin, who belongs
+   * to none.
+   *
+   * Read from the user's own row on every request, never from the JWT and never
+   * from the client. A company id in a token could not be revoked without
+   * waiting for the token to expire, and one from a payload is simply the
+   * caller's choice of tenant.
+   */
+  companyId?: string | null;
   employeeId?: string | null;
   mustChangePassword?: boolean;
 }
@@ -151,7 +161,7 @@ export const getCurrentUser = cache(async function getCurrentUser(): Promise<Ses
       where: { id: payload.sub },
       select: {
         id: true, email: true, name: true, role: true, status: true,
-        employeeId: true, mustChangePassword: true,
+        employeeId: true, mustChangePassword: true, companyId: true,
       },
     });
 
@@ -159,6 +169,7 @@ export const getCurrentUser = cache(async function getCurrentUser(): Promise<Ses
 
     return {
       id: user.id, email: user.email, name: user.name, role: user.role,
+      companyId: user.companyId,
       employeeId: user.employeeId, mustChangePassword: user.mustChangePassword,
     };
   } catch {

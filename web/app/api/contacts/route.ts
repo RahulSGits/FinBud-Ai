@@ -15,8 +15,11 @@ export async function GET(req: NextRequest) {
   const status = req.nextUrl.searchParams.get('status');
   const q = req.nextUrl.searchParams.get('q');
 
-  // Employees see their own leads by default; admins see everything.
-  const where: any = {};
+  // Starts from the scope helper rather than an empty object: this handler
+  // built its own filter, so it would have been the one route that silently
+  // ignored tenancy. visibleContacts already encodes both the company and the
+  // employee-sees-their-own rule.
+  const where: any = { ...visibleContacts(user) };
   if (mine || user.role === Role.employee) where.assignedToId = user.id;
   if (status) where.status = status;
   if (q) {
@@ -51,6 +54,16 @@ export async function POST(req: NextRequest) {
   const rows = Array.isArray(body.contacts) ? body.contacts : [];
   if (!rows.length) return NextResponse.json({ error: 'No contacts provided' }, { status: 400 });
 
+  // From the session, never the payload. An import must land in the importer's
+  // own company, and a super admin has none to import into.
+  const companyId = user.companyId;
+  if (!companyId) {
+    return NextResponse.json(
+      { error: 'Select a company before importing contacts.' },
+      { status: 400 }
+    );
+  }
+
   let created = 0, updated = 0, skippedNotYours = 0, skippedDoNotCall = 0;
   const invalid: string[] = [];
 
@@ -81,17 +94,18 @@ export async function POST(req: NextRequest) {
       customFields: row.customFields ?? undefined,
     };
 
-    // Upsert on phone: re-importing a sheet updates rather than duplicating.
+    // Upsert on (company, phone): re-importing a sheet updates rather than
+    // duplicating, and never reaches another company's copy of the same lead.
     const existing = await db.contact.findUnique({
-      where: { phone },
+      where: { companyId_phone: { companyId, phone } },
       select: { id: true, assignedToId: true, status: true },
     });
 
     if (existing) {
-      // Phone is globally unique, so importing a sheet containing someone
-      // else's lead would otherwise silently take it over — assignment and all.
-      // An employee may only update leads already theirs; an admin may update
-      // any. Either way the import never changes who a lead belongs to.
+      // Within a company, phone is unique — so importing a sheet containing a
+      // colleague's lead would otherwise silently take it over, assignment and
+      // all. An employee may only update leads already theirs; an admin may
+      // update any. Either way the import never changes who a lead belongs to.
       if (!isAdmin(user) && existing.assignedToId !== user.id) {
         skippedNotYours++;
         continue;
@@ -102,13 +116,14 @@ export async function POST(req: NextRequest) {
         skippedDoNotCall++;
         continue;
       }
-      await db.contact.update({ where: { phone }, data });
+      await db.contact.update({ where: { companyId_phone: { companyId, phone } }, data });
       updated++;
     } else {
       await db.contact.create({
         data: {
           ...data,
           phone,
+          companyId,
           status: ContactStatus.pending,
           // Admins may hand an import to someone; an employee's import is
           // always their own, never assignable to a colleague.
@@ -121,7 +136,7 @@ export async function POST(req: NextRequest) {
 
   await db.auditLog.create({
     data: {
-      action: 'contacts.imported', entity: 'Contact', userId: user.id,
+      action: 'contacts.imported', entity: 'Contact', userId: user.id, companyId,
       meta: { created, updated, invalid: invalid.length, skippedNotYours, skippedDoNotCall },
     },
   });
