@@ -119,11 +119,16 @@ function refused(transcriptText: string | null): boolean {
 export async function recordFindings(opts: {
   callId: string;
   contactId: string | null;
+  /** The tenant the call belongs to, so findings are scoped like everything else. */
+  companyId: string | null;
   transcriptText: string | null;
   claims: ExtractedClaim[];
 }): Promise<{ created: number; updated: number; contradicted: number }> {
-  const { callId, contactId, transcriptText, claims } = opts;
+  const { callId, contactId, companyId, transcriptText, claims } = opts;
   if (!claims.length) return { created: 0, updated: 0, contradicted: 0 };
+  // A finding belongs to the call's company. Without one there is nothing to
+  // scope it to, and an unscoped finding is invisible to every reviewer.
+  if (!companyId) return { created: 0, updated: 0, contradicted: 0 };
 
   const customerRefused = refused(transcriptText);
   let created = 0;
@@ -163,6 +168,7 @@ export async function recordFindings(opts: {
         data: {
           callId,
           contactId,
+          companyId,
           kind: claim.kind,
           value,
           quote,

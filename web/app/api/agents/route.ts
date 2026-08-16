@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { db } from '@/lib/db';
 import { AuthError, requireUser } from '@/lib/auth';
-import { assertOwner, errorResponse, visibleAgents } from '@/lib/authz';
+import { assertOwner, errorResponse, requireCompany, visibleAgents } from '@/lib/authz';
 import { defaultProviderId } from '@/lib/providers';
 import { syncAgent, unsyncAgent } from '@/lib/providers/sync';
 
@@ -71,9 +71,10 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: 'Agent name is required' }, { status: 400 });
   }
 
+  const companyId = requireCompany(user);
   const data = pick(body);
   const agent = await db.agent.create({
-    data: { ...data, name: String(body.name).trim(), createdById: user.id },
+    data: { ...data, name: String(body.name).trim(), createdById: user.id, companyId },
   });
 
   await db.auditLog.create({

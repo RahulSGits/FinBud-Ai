@@ -146,10 +146,14 @@ model CompanySetting {
 
 model User {
 
-  /// The tenant this row belongs to. Nullable only until the backfill has
-  /// run; every write path sets it.
-  companyId String?
-  tenant    Company? @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  /// The tenant this row belongs to.
+  ///
+  /// Required, deliberately: a nullable column let a create quietly omit it,
+  /// and such a row is invisible to every scope while — because NULL never
+  /// collides in a Postgres unique index — still slipping past the composite
+  /// uniques. Required makes each omission a compile error instead.
+  companyId String
+  tenant    Company @relation(fields: [companyId], references: [id], onDelete: Cascade)
   id    String @id @default(uuid())
   email String @unique
   name  String
@@ -206,10 +210,14 @@ model User {
 /// only its hash, so a database leak cannot be used to claim accounts.
 model Invite {
 
-  /// The tenant this row belongs to. Nullable only until the backfill has
-  /// run; every write path sets it.
-  companyId String?
-  tenant    Company? @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  /// The tenant this row belongs to.
+  ///
+  /// Required, deliberately: a nullable column let a create quietly omit it,
+  /// and such a row is invisible to every scope while — because NULL never
+  /// collides in a Postgres unique index — still slipping past the composite
+  /// uniques. Required makes each omission a compile error instead.
+  companyId String
+  tenant    Company @relation(fields: [companyId], references: [id], onDelete: Cascade)
   id        String   @id @default(uuid())
   email     String
   role      Role     @default(employee)
@@ -232,10 +240,14 @@ model Invite {
 
 model Agent {
 
-  /// The tenant this row belongs to. Nullable only until the backfill has
-  /// run; every write path sets it.
-  companyId String?
-  tenant    Company? @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  /// The tenant this row belongs to.
+  ///
+  /// Required, deliberately: a nullable column let a create quietly omit it,
+  /// and such a row is invisible to every scope while — because NULL never
+  /// collides in a Postgres unique index — still slipping past the composite
+  /// uniques. Required makes each omission a compile error instead.
+  companyId String
+  tenant    Company @relation(fields: [companyId], references: [id], onDelete: Cascade)
   id          String  @id @default(uuid())
   name        String
   description String?
@@ -334,10 +346,14 @@ enum ContactStatus {
 
 model Contact {
 
-  /// The tenant this row belongs to. Nullable only until the backfill has
-  /// run; every write path sets it.
-  companyId String?
-  tenant    Company? @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  /// The tenant this row belongs to.
+  ///
+  /// Required, deliberately: a nullable column let a create quietly omit it,
+  /// and such a row is invisible to every scope while — because NULL never
+  /// collides in a Postgres unique index — still slipping past the composite
+  /// uniques. Required makes each omission a compile error instead.
+  companyId String
+  tenant    Company @relation(fields: [companyId], references: [id], onDelete: Cascade)
   id      String  @id @default(uuid())
   name    String?
   phone   String
@@ -396,10 +412,14 @@ enum CampaignStatus {
 
 model Campaign {
 
-  /// The tenant this row belongs to. Nullable only until the backfill has
-  /// run; every write path sets it.
-  companyId String?
-  tenant    Company? @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  /// The tenant this row belongs to.
+  ///
+  /// Required, deliberately: a nullable column let a create quietly omit it,
+  /// and such a row is invisible to every scope while — because NULL never
+  /// collides in a Postgres unique index — still slipping past the composite
+  /// uniques. Required makes each omission a compile error instead.
+  companyId String
+  tenant    Company @relation(fields: [companyId], references: [id], onDelete: Cascade)
   id     String         @id @default(uuid())
   name   String
   status CampaignStatus @default(draft)
@@ -456,10 +476,14 @@ enum LeadStatus {
 
 model Call {
 
-  /// The tenant this row belongs to. Nullable only until the backfill has
-  /// run; every write path sets it.
-  companyId String?
-  tenant    Company? @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  /// The tenant this row belongs to.
+  ///
+  /// Required, deliberately: a nullable column let a create quietly omit it,
+  /// and such a row is invisible to every scope while — because NULL never
+  /// collides in a Postgres unique index — still slipping past the composite
+  /// uniques. Required makes each omission a compile error instead.
+  companyId String
+  tenant    Company @relation(fields: [companyId], references: [id], onDelete: Cascade)
   id        String @id @default(uuid())
   phone     String
   direction String @default("outbound")
@@ -521,10 +545,14 @@ model Call {
 /// Employee follow-up: free-text notes and scheduled callbacks.
 model Note {
 
-  /// The tenant this row belongs to. Nullable only until the backfill has
-  /// run; every write path sets it.
-  companyId String?
-  tenant    Company? @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  /// The tenant this row belongs to.
+  ///
+  /// Required, deliberately: a nullable column let a create quietly omit it,
+  /// and such a row is invisible to every scope while — because NULL never
+  /// collides in a Postgres unique index — still slipping past the composite
+  /// uniques. Required makes each omission a compile error instead.
+  companyId String
+  tenant    Company @relation(fields: [companyId], references: [id], onDelete: Cascade)
   id   String @id @default(uuid())
   body String
 
@@ -559,10 +587,14 @@ enum DocumentStatus {
 
 model Document {
 
-  /// The tenant this row belongs to. Nullable only until the backfill has
-  /// run; every write path sets it.
-  companyId String?
-  tenant    Company? @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  /// The tenant this row belongs to.
+  ///
+  /// Required, deliberately: a nullable column let a create quietly omit it,
+  /// and such a row is invisible to every scope while — because NULL never
+  /// collides in a Postgres unique index — still slipping past the composite
+  /// uniques. Required makes each omission a compile error instead.
+  companyId String
+  tenant    Company @relation(fields: [companyId], references: [id], onDelete: Cascade)
   id          String         @id @default(uuid())
   name        String
   mimeType    String
@@ -625,10 +657,14 @@ enum MessageStatus {
 /// and edit their own follow-ups without a deploy.
 model MessageTemplate {
 
-  /// The tenant this row belongs to. Nullable only until the backfill has
-  /// run; every write path sets it.
-  companyId String?
-  tenant    Company? @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  /// The tenant this row belongs to.
+  ///
+  /// Required, deliberately: a nullable column let a create quietly omit it,
+  /// and such a row is invisible to every scope while — because NULL never
+  /// collides in a Postgres unique index — still slipping past the composite
+  /// uniques. Required makes each omission a compile error instead.
+  companyId String
+  tenant    Company @relation(fields: [companyId], references: [id], onDelete: Cascade)
   id   String @id @default(uuid())
   name String
   body String
@@ -657,10 +693,14 @@ model MessageTemplate {
 /// retroactively.
 model Message {
 
-  /// The tenant this row belongs to. Nullable only until the backfill has
-  /// run; every write path sets it.
-  companyId String?
-  tenant    Company? @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  /// The tenant this row belongs to.
+  ///
+  /// Required, deliberately: a nullable column let a create quietly omit it,
+  /// and such a row is invisible to every scope while — because NULL never
+  /// collides in a Postgres unique index — still slipping past the composite
+  /// uniques. Required makes each omission a compile error instead.
+  companyId String
+  tenant    Company @relation(fields: [companyId], references: [id], onDelete: Cascade)
   id   String @id @default(uuid())
   to   String
   body String
@@ -706,8 +746,12 @@ model Setting {
 
 model AuditLog {
 
-  /// The tenant this row belongs to. Nullable only until the backfill has
-  /// run; every write path sets it.
+  /// The tenant this entry belongs to, when it has one.
+  ///
+  /// Nullable unlike every other model here, and for a real reason: the
+  /// platform owner's own actions — approving a company, changing a plan —
+  /// belong to no tenant. Requiring a company would mean inventing one for
+  /// events that genuinely have none.
   companyId String?
   tenant    Company? @relation(fields: [companyId], references: [id], onDelete: Cascade)
   id       String  @id @default(uuid())
@@ -756,10 +800,14 @@ enum FindingState {
 
 model CallFinding {
 
-  /// The tenant this row belongs to. Nullable only until the backfill has
-  /// run; every write path sets it.
-  companyId String?
-  tenant    Company? @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  /// The tenant this row belongs to.
+  ///
+  /// Required, deliberately: a nullable column let a create quietly omit it,
+  /// and such a row is invisible to every scope while — because NULL never
+  /// collides in a Postgres unique index — still slipping past the composite
+  /// uniques. Required makes each omission a compile error instead.
+  companyId String
+  tenant    Company @relation(fields: [companyId], references: [id], onDelete: Cascade)
   id String @id @default(uuid())
 
   callId String

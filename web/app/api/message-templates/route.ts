@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { LeadStatus, Prisma } from '@prisma/client';
 import { db } from '@/lib/db';
 import { requireUser } from '@/lib/auth';
-import { assertOwner, errorResponse } from '@/lib/authz';
+import { assertOwner, errorResponse, requireCompany } from '@/lib/authz';
 import { extractPlaceholders } from '@/lib/messaging/render';
 import { WHATSAPP_TEXT_LIMIT } from '@/lib/messaging/whatsapp';
 import { visibleTemplates } from '@/lib/messaging/send';
@@ -133,6 +133,7 @@ export async function POST(req: NextRequest) {
     }
   }
 
+  const companyId = requireCompany(user);
   const template = await db.messageTemplate.create({
     data: {
       name,
@@ -140,6 +141,7 @@ export async function POST(req: NextRequest) {
       leadStatus,
       isActive: payload.isActive === undefined ? true : Boolean(payload.isActive),
       createdById: user.id,
+      companyId,
     },
     include: {
       createdBy: { select: { id: true, name: true } },

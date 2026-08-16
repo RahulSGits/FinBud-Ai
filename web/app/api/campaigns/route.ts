@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { CallStatus, CampaignStatus, Prisma } from '@prisma/client';
 import { db } from '@/lib/db';
 import { AuthError, requireUser } from '@/lib/auth';
-import { assertOwner, errorResponse, isAdmin, visibleCampaigns } from '@/lib/authz';
+import { assertOwner, errorResponse, isAdmin, requireCompany, visibleCampaigns } from '@/lib/authz';
 import { parseBusinessHours } from '@/lib/campaigns/business-hours';
 
 // Create/read/update/delete only. Every status transition (draft -> running ->
@@ -78,6 +78,7 @@ export async function POST(req: NextRequest) {
   const agent = await db.agent.findUnique({ where: { id: body.agentId } });
   if (!agent) return NextResponse.json({ error: 'Agent not found' }, { status: 404 });
 
+  const companyId = requireCompany(user);
   const hours = businessHoursJson(body.businessHours);
 
   const campaign = await db.campaign.create({
@@ -85,6 +86,7 @@ export async function POST(req: NextRequest) {
       name: String(body.name).trim(),
       agentId: body.agentId,
       createdById: user.id,
+      companyId,
       status: CampaignStatus.draft,
       concurrency: toInt(body.concurrency, 1, 1, 50),
       dailyCallLimit: body.dailyCallLimit ? toInt(body.dailyCallLimit, 1, 1, 100_000) : null,

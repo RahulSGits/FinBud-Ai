@@ -145,6 +145,10 @@ export async function placeCall(opts: {
       campaignId: contact.campaignId,
       agentId: agent.id,
       startedById: opts.user.id,
+      // Inherited from the contact rather than the caller: the call belongs to
+      // whoever owns the lead, which is the same company either way but is the
+      // relationship that actually defines it.
+      companyId: contact.companyId,
     },
   });
 

@@ -10,7 +10,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { CampaignStatus, ContactStatus, Prisma } from '@prisma/client';
 import { db } from '@/lib/db';
 import { requireUser } from '@/lib/auth';
-import { errorResponse, visibleAgents, visibleContacts } from '@/lib/authz';
+import { errorResponse, requireCompany, visibleAgents, visibleContacts } from '@/lib/authz';
 import { describeWindow, isWithinBusinessHours, parseBusinessHours } from '@/lib/campaigns/business-hours';
 import { tickCampaign, type TickResult } from '@/lib/campaigns/runner';
 import { getProvider, isMockMode } from '@/lib/providers';
@@ -171,11 +171,13 @@ export async function POST(req: NextRequest) {
   const name = (rawName || defaultName(queueable.length)).slice(0, 120);
   const hoursJson = businessHoursJson(body.businessHours);
 
+  const companyId = requireCompany(user);
   const campaign = await db.campaign.create({
     data: {
       name,
       agentId: agent.id,
       createdById: user.id,
+      companyId,
       status: CampaignStatus.draft,
       concurrency: toInt(body.concurrency, 3, 1, 50),
       retryLimit: 1,

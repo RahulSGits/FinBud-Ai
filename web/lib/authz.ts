@@ -144,6 +144,29 @@ export function assertOwner(
   }
 }
 
+/**
+ * The caller's company, or a refusal.
+ *
+ * Every tenant-owned row requires a company, and a session's is nullable
+ * because a super admin has none. Rather than each create coping with that
+ * separately — and one of them eventually coping by writing a null — the
+ * narrowing happens once, here.
+ *
+ * A super admin genuinely cannot create company-owned rows without choosing a
+ * company first; the message says so instead of failing at the database.
+ */
+export function requireCompany(user: SessionUser): string {
+  if (!user.companyId) {
+    throw new AuthError(
+      isSuperAdmin(user)
+        ? 'Choose a company before creating anything inside one.'
+        : 'Your account is not attached to a company.',
+      400
+    );
+  }
+  return user.companyId;
+}
+
 /** Map an AuthError (or anything else) onto a JSON response body + status. */
 export function errorResponse(e: unknown): { body: { error: string }; status: number } {
   if (e instanceof AuthError) return { body: { error: e.message }, status: e.status };

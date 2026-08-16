@@ -3,6 +3,7 @@ import { randomUUID } from 'crypto';
 import { DocumentStatus } from '@prisma/client';
 import { db } from '@/lib/db';
 import { AuthError, requireAdmin, requireUser, type SessionUser } from '@/lib/auth';
+import { requireCompany } from '@/lib/authz';
 import { chunkText } from '@/lib/knowledge/chunk';
 import { embedTexts, isEmbeddingConfigured } from '@/lib/knowledge/embed';
 import { extractDocumentText, isSupportedFile, mimeTypeFor, supportedTypesLabel } from '@/lib/knowledge/extract';
@@ -129,11 +130,13 @@ export async function POST(req: NextRequest) {
 
   // The id is generated here so the storage key can contain it, and so the row
   // exists — visible in the UI as "processing" — before the slow work starts.
+  const companyId = requireCompany(user);
   const id = randomUUID();
   const document = await db.document.create({
     data: {
       id,
       name,
+      companyId,
       mimeType: field.type || mimeTypeFor(name),
       sizeBytes: buffer.byteLength,
       // A logical key only. The original binary is never retained: retrieval
@@ -292,11 +295,13 @@ async function importFromUrl(req: NextRequest, user: SessionUser): Promise<NextR
   const host = new URL(crawl.pages[0].url).hostname;
   const name = (crawl.title || host).slice(0, 200);
 
+  const companyId = requireCompany(user);
   const id = randomUUID();
   const document = await db.document.create({
     data: {
       id,
       name,
+      companyId,
       mimeType: 'text/html',
       sizeBytes: crawl.pages.reduce((n, p) => n + p.text.length, 0),
       storagePath: `kb/${id}/${host}`,

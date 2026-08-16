@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { Role } from '@prisma/client';
 import { db } from '@/lib/db';
 import { AuthError, requireUser } from '@/lib/auth';
+import { requireCompany } from '@/lib/authz';
 
 function deny(e: unknown) {
   const err = e as AuthError;
@@ -66,12 +67,14 @@ export async function POST(req: NextRequest) {
     callbackAt = d;
   }
 
+  const companyId = requireCompany(user);
   const note = await db.note.create({
     data: {
       body: text.slice(0, 4000),
       contactId,
       callId: payload.callId ? String(payload.callId) : null,
       authorId: user.id,
+      companyId,
       callbackAt,
     },
     include: { author: { select: { id: true, name: true } } },

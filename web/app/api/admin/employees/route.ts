@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { Role, UserStatus } from '@prisma/client';
 import { db } from '@/lib/db';
 import { AuthError, DEFAULT_PASSWORD, hashPassword, requireAdmin } from '@/lib/auth';
+import { requireCompany } from '@/lib/authz';
 
 function deny(e: unknown) {
   const err = e as AuthError;
@@ -40,6 +41,10 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: err.message }, { status: err.status ?? 500 });
   }
 
+  // Resolved before any lookup, because the uniqueness checks below are
+  // scoped to it too.
+  const companyId = requireCompany(admin);
+
   const body = await req.json().catch(() => ({}));
   const email = String(body.email ?? '').toLowerCase().trim();
   const name = String(body.name ?? '').trim();
@@ -60,7 +65,13 @@ export async function POST(req: NextRequest) {
   }
   if (employeeId) {
     const idClash = await db.user.findFirst({
-      where: { employeeId: { equals: employeeId, mode: 'insensitive' } },
+      where: {
+        employeeId: { equals: employeeId, mode: 'insensitive' },
+        // Scoped: ids are assigned per company, so FB-001 exists in every one
+        // of them. A global check would refuse a perfectly free id — and the
+        // message names the holder, so it would leak another company's staff.
+        companyId,
+      },
     });
     if (idClash) {
       return NextResponse.json(
@@ -75,6 +86,9 @@ export async function POST(req: NextRequest) {
   const user = await db.user.create({
     data: {
       email, name, employeeId, role, phone, department, designation,
+      // The creator's company, from their session. An admin can only ever add
+      // people to their own company.
+      companyId,
       passwordHash,
       status: UserStatus.active,   // can log in immediately
       mustChangePassword: true,    // but forced to change first

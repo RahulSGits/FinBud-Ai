@@ -235,6 +235,7 @@ export async function tickCampaign(campaignId: string): Promise<TickResult> {
           contactId: contact.id,
           campaignId,
           agentId: campaign.agentId,
+          companyId: campaign.companyId,
         },
       });
     } catch (err) {

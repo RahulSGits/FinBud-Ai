@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { Role, UserStatus } from '@prisma/client';
 import { db } from '@/lib/db';
 import { AuthError, createInviteToken, requireAdmin, type SessionUser } from '@/lib/auth';
+import { requireCompany } from '@/lib/authz';
 import { sendInviteEmail } from '@/lib/email';
 
 const INVITE_TTL_HOURS = 48;
@@ -81,6 +82,8 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: 'That email already has an active account' }, { status: 409 });
   }
 
+  // An invite can only ever admit somebody to the inviter's own company.
+  const companyId = requireCompany(admin);
   const { raw, hash } = createInviteToken();
   const expiresAt = new Date(Date.now() + INVITE_TTL_HOURS * 3_600_000);
 
@@ -89,13 +92,15 @@ export async function POST(req: NextRequest) {
   const user = await db.$transaction(async (tx) => {
     const u = existing
       ? await tx.user.update({ where: { id: existing.id }, data: { name, role, employeeId } })
-      : await tx.user.create({ data: { email, name, role, employeeId, status: UserStatus.invited } });
+      : await tx.user.create({
+          data: { email, name, role, employeeId, status: UserStatus.invited, companyId },
+        });
 
     // Supersede any outstanding invite for this address.
     await tx.invite.deleteMany({ where: { email, acceptedAt: null } });
 
     await tx.invite.create({
-      data: { email, role, tokenHash: hash, expiresAt, invitedById: admin.id },
+      data: { email, role, tokenHash: hash, expiresAt, invitedById: admin.id, companyId },
     });
 
     await tx.auditLog.create({

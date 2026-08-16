@@ -154,7 +154,7 @@ export async function sendMessage(input: SendMessageInput): Promise<SendResult> 
     where: { id: contactId, ...visibleContacts(user) },
     select: {
       id: true, name: true, phone: true, company: true,
-      loanType: true, loanAmount: true, status: true,
+      loanType: true, loanAmount: true, status: true, companyId: true,
     },
   });
   if (!contact) {
@@ -244,6 +244,7 @@ export async function sendMessage(input: SendMessageInput): Promise<SendResult> 
       contactId: contact.id,
       callId: call?.id ?? null,
       sentById: user.id,
+      companyId: contact.companyId,
     },
     select: { id: true },
   });
