@@ -14,6 +14,9 @@ import {
 import { redirect } from 'next/navigation';
 import { db } from '@/lib/db';
 import { getCurrentUser } from '@/lib/auth';
+import {
+  visibleAgents, visibleCalls, visibleCampaigns, visibleContacts, visibleUsers,
+} from '@/lib/authz';
 import { PageHeader } from '@/components/shell/page-header';
 import { LiveCallsPanel } from '@/components/voice/live-calls-panel';
 import { cn } from '@/lib/utils';
@@ -45,7 +48,17 @@ export default async function AdminOverview() {
   const startOfDay = new Date();
   startOfDay.setHours(0, 0, 0, 0);
 
-  const today = { startedAt: { gte: startOfDay } };
+  // One tenant scope per model, composed into every figure below. The overview
+  // fans out seventeen queries; scoping them individually is seventeen chances
+  // to forget, and the one that forgets shows another company's numbers on this
+  // company's front page.
+  const callScope = visibleCalls(user);
+  const agentScope = visibleAgents(user);
+  const contactScope = visibleContacts(user);
+  const campaignScope = visibleCampaigns(user);
+  const userScope = visibleUsers(user);
+
+  const today = { ...callScope, startedAt: { gte: startOfDay } };
 
   // Every figure below is read fresh on each request: the page is
   // force-dynamic, and the live rail's own polling ends in router.refresh(),
@@ -59,24 +72,24 @@ export default async function AdminOverview() {
     // whoever owns the lead. Grouped, so this stays four queries at any volume.
     startedCalls, ownedCalls, startedInterested, ownedInterested, activeUsers,
   ] = await Promise.all([
-    db.agent.count(),
-    db.agent.count({ where: { isActive: true } }),
-    db.contact.count(),
-    db.campaign.count({ where: { status: CampaignStatus.running } }),
+    db.agent.count({ where: agentScope }),
+    db.agent.count({ where: { ...agentScope, isActive: true } }),
+    db.contact.count({ where: contactScope }),
+    db.campaign.count({ where: { ...campaignScope, status: CampaignStatus.running } }),
     db.call.count({ where: today }),
     db.call.count({ where: { ...today, durationSec: { gt: 0 } } }),
     db.call.count({ where: { ...today, interested: true } }),
     db.call.findMany({
-      where: { status: { in: IN_FLIGHT } },
+      where: { ...callScope, status: { in: IN_FLIGHT } },
       orderBy: { startedAt: 'desc' },
       take: 12,
       include: { contact: { select: { name: true } }, agent: { select: { name: true } } },
     }),
     // Counted separately because the rail above is capped at 12 rows: on a busy
     // campaign its length would under-report what is actually on the phones.
-    db.call.count({ where: { status: { in: IN_FLIGHT } } }),
+    db.call.count({ where: { ...callScope, status: { in: IN_FLIGHT } } }),
     db.call.findMany({
-      where: { status: CallStatus.completed },
+      where: { ...callScope, status: CallStatus.completed },
       orderBy: { startedAt: 'desc' },
       take: 8,
       include: { contact: { select: { name: true } }, campaign: { select: { name: true } } },
@@ -106,7 +119,7 @@ export default async function AdminOverview() {
       _count: true,
     }),
     db.user.findMany({
-      where: { status: UserStatus.active },
+      where: { ...userScope, status: UserStatus.active },
       select: { id: true, name: true, employeeId: true },
     }),
   ]);
@@ -122,7 +135,7 @@ export default async function AdminOverview() {
   );
   const owners = contactIds.length
     ? await db.contact.findMany({
-        where: { id: { in: contactIds } },
+        where: { ...contactScope, id: { in: contactIds } },
         select: { id: true, assignedToId: true },
       })
     : [];

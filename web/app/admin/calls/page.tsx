@@ -1,6 +1,7 @@
 import { redirect } from 'next/navigation';
 import { db } from '@/lib/db';
 import { getCurrentUser } from '@/lib/auth';
+import { visibleCalls } from '@/lib/authz';
 import { PageHeader } from '@/components/shell/page-header';
 import { CallList } from '@/components/calls/call-list';
 import { ManualDial } from '@/components/calls/manual-dial';
@@ -16,6 +17,7 @@ export default async function AdminCallsPage() {
   if (user.role !== 'admin') redirect('/dashboard');
 
   const calls = await db.call.findMany({
+    where: visibleCalls(user),
     orderBy: { startedAt: 'desc' },
     take: 300,
     include: {

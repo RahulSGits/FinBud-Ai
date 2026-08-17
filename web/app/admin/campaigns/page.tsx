@@ -3,6 +3,7 @@ import { CalendarClock, Clock, Megaphone } from 'lucide-react';
 import { redirect } from 'next/navigation';
 import { db } from '@/lib/db';
 import { getCurrentUser } from '@/lib/auth';
+import { visibleAgents, visibleCalls, visibleCampaigns, visibleContacts } from '@/lib/authz';
 import { PageHeader } from '@/components/shell/page-header';
 import { CampaignControls } from '@/components/campaigns/campaign-controls';
 import { CampaignForm, DeleteCampaignButton } from '@/components/campaigns/campaign-form';
@@ -38,6 +39,7 @@ export default async function CampaignsPage() {
 
   const [campaigns, agents, unassignedCount] = await Promise.all([
     db.campaign.findMany({
+      where: visibleCampaigns(user),
       orderBy: { createdAt: 'desc' },
       include: {
         agent: { select: { name: true } },
@@ -45,17 +47,18 @@ export default async function CampaignsPage() {
       },
     }),
     db.agent.findMany({
+      where: visibleAgents(user),
       orderBy: [{ isActive: 'desc' }, { name: 'asc' }],
       select: { id: true, name: true, isActive: true },
     }),
-    db.contact.count({ where: { campaignId: null } }),
+    db.contact.count({ where: { ...visibleContacts(user), campaignId: null } }),
   ]);
 
   // Two grouped queries rather than per-campaign lookups.
   const [live, queued, interested] = await Promise.all([
-    db.call.groupBy({ by: ['campaignId'], where: { status: { in: IN_FLIGHT } }, _count: true }),
-    db.contact.groupBy({ by: ['campaignId'], where: { status: { in: QUEUED } }, _count: true }),
-    db.call.groupBy({ by: ['campaignId'], where: { interested: true }, _count: true }),
+    db.call.groupBy({ by: ['campaignId'], where: { ...visibleCalls(user), status: { in: IN_FLIGHT } }, _count: true }),
+    db.contact.groupBy({ by: ['campaignId'], where: { ...visibleContacts(user), status: { in: QUEUED } }, _count: true }),
+    db.call.groupBy({ by: ['campaignId'], where: { ...visibleCalls(user), interested: true }, _count: true }),
   ]);
   const liveBy = new Map(live.map((r) => [r.campaignId, r._count]));
   const queuedBy = new Map(queued.map((r) => [r.campaignId, r._count]));

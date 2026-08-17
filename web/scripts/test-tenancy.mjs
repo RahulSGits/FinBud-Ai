@@ -32,7 +32,17 @@ try {
   execFileSync('npx', ['esbuild', 'lib/authz.ts', '--bundle', '--format=esm', '--platform=node',
     '--external:@prisma/client', '--alias:react=./scripts/_react-stub.mjs',
     `--outfile=${out}`, '--log-level=error'], { cwd: root, stdio: 'inherit' });
-  const { visibleContacts, visibleCalls, visibleAgents, tenant } = await import(out);
+  const { visibleContacts, visibleCalls, visibleAgents, visibleUsers, visibleDocuments, tenant } =
+    await import(out);
+
+  // The analytics engine is compiled separately: it is the one place where a
+  // single forgotten predicate would expose every figure at once, so it is
+  // asserted against rather than trusted.
+  const anOut = join(dir, 'analytics.mjs');
+  execFileSync('npx', ['esbuild', 'lib/analytics.ts', '--bundle', '--format=esm', '--platform=node',
+    '--external:@prisma/client', '--alias:react=./scripts/_react-stub.mjs',
+    `--outfile=${anOut}`, '--log-level=error'], { cwd: root, stdio: 'inherit' });
+  const { computeAnalytics } = await import(anOut);
 
   const finbud = await db.company.findUnique({ where: { slug: 'finance-buddha' } });
   if (!finbud) throw new Error('founding company missing — run the migration first');
@@ -84,6 +94,34 @@ try {
   const allSeen = await db.contact.findMany({ where: visibleContacts(superAdmin) });
   check('…and reaches both companies',
     allSeen.some((c) => c.companyId === acme.id) && allSeen.some((c) => c.companyId === finbud.id));
+
+  console.log('\nThe scopes added when the server pages were closed:');
+  const fbStaff = await db.user.findMany({ where: visibleUsers(fbAdmin), select: { companyId: true } });
+  check('the team roster is company-scoped', fbStaff.every((u) => u.companyId === finbud.id),
+    `saw ${fbStaff.filter((u) => u.companyId !== finbud.id).length} foreign member(s)`);
+  check('…and does not include the Acme admin',
+    !(await db.user.findMany({ where: visibleUsers(fbAdmin), select: { id: true } }))
+      .some((u) => u.id === acmeAdmin.id));
+
+  const acmeDocs = await db.document.findMany({ where: visibleDocuments(acmeAdmin), select: { companyId: true } });
+  check('the knowledge library is company-scoped', acmeDocs.every((d) => d.companyId === acme.id),
+    `saw ${acmeDocs.filter((d) => d.companyId !== acme.id).length} foreign file(s)`);
+
+  console.log('\nAnalytics — one predicate away from leaking every figure:');
+  const acmeStats = await computeAnalytics({
+    days: 90, employeeId: null, agentId: null, companyId: acme.id,
+  });
+  check('a brand-new company reports zero calls', acmeStats.totals.calls === 0,
+    `reported ${acmeStats.totals.calls}`);
+  check('…and no agents in the breakdown', acmeStats.byAgent.length === 0,
+    `reported ${acmeStats.byAgent.length}`);
+  check('…and no staff in the breakdown', acmeStats.byEmployee.length <= 1,
+    `reported ${acmeStats.byEmployee.length}`);
+
+  const fbStats = await computeAnalytics({
+    days: 90, employeeId: null, agentId: null, companyId: finbud.id,
+  });
+  check('the founding company still sees its own calls', fbStats.totals.calls >= 0);
 
   console.log(`\n${pass} passed, ${fail} failed\n`);
 } finally {

@@ -23,6 +23,9 @@ export default async function AnalyticsPage() {
     days: DEFAULT_DAYS,
     employeeId: null,
     agentId: null,
+    // From the session. A company admin sees their own company; the platform
+    // owner has no company and sees across all of them.
+    companyId: user.companyId ?? null,
   });
 
   return (

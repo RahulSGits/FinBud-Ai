@@ -3,6 +3,7 @@ import { Bot, Plus, PhoneCall, Megaphone, Mic, Languages, CheckCircle2, CloudOff
 import { redirect } from 'next/navigation';
 import { db } from '@/lib/db';
 import { getCurrentUser } from '@/lib/auth';
+import { visibleAgents } from '@/lib/authz';
 import { getProvider } from '@/lib/providers';
 import { PageHeader } from '@/components/shell/page-header';
 import { cn } from '@/lib/utils';
@@ -27,6 +28,7 @@ export default async function AgentsPage() {
   if (user.role !== 'admin') redirect('/dashboard');
 
   const agents = await db.agent.findMany({
+    where: visibleAgents(user),
     orderBy: { updatedAt: 'desc' },
     include: { _count: { select: { calls: true, campaigns: true } } },
   });

@@ -16,15 +16,18 @@ export const dynamic = 'force-dynamic';
  * cannot export it (Next.js rejects non-route exports).
  */
 export async function GET(req: NextRequest) {
+  let user;
   try {
-    await requireAdmin();
+    user = await requireAdmin();
   } catch (e) {
     const { body, status } = errorResponse(e);
     return NextResponse.json(body, { status });
   }
 
   try {
-    const data = await computeAnalytics(parseAnalyticsQuery(req.nextUrl.searchParams));
+    const data = await computeAnalytics(
+      parseAnalyticsQuery(req.nextUrl.searchParams, user.companyId ?? null)
+    );
     return NextResponse.json(data);
   } catch (e) {
     console.error('analytics failed:', e);

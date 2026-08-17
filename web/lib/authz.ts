@@ -113,6 +113,22 @@ export function visibleContacts(user: SessionUser): Prisma.ContactWhereInput {
  * personally started — a call they placed before the lead was reassigned is
  * still their own record.
  */
+/**
+ * Colleagues the caller may see.
+ *
+ * Unlike the other scopes this is not narrowed further by role: everyone in a
+ * company can see who else is in it, which is what a team page is for. The
+ * tenant boundary is the whole of the restriction.
+ */
+export function visibleUsers(user: SessionUser): Prisma.UserWhereInput {
+  return tenant(user);
+}
+
+/** Knowledge-base files the caller may read. Tenant boundary only. */
+export function visibleDocuments(user: SessionUser): Prisma.DocumentWhereInput {
+  return tenant(user);
+}
+
 export function visibleCalls(user: SessionUser): Prisma.CallWhereInput {
   if (isAdmin(user)) return tenant(user);
   return {

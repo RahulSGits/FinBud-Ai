@@ -3,6 +3,7 @@ import { CallStatus, Role } from '@prisma/client';
 import { BadgeCheck } from 'lucide-react';
 import { db } from '@/lib/db';
 import { getCurrentUser } from '@/lib/auth';
+import { visibleCalls, visibleContacts, visibleUsers } from '@/lib/authz';
 import { PageHeader } from '@/components/shell/page-header';
 import { TeamManager, type TeamMember } from '@/components/team/team-manager';
 
@@ -23,27 +24,35 @@ export default async function TeamPage() {
   // grew — and, unlike a name sort, it does not reshuffle the moment somebody
   // is renamed.
   const users = await db.user.findMany({
+    where: visibleUsers(me),
     orderBy: [{ role: 'asc' }, { employeeId: 'asc' }],
     include: { _count: { select: { assignedContacts: true } } },
   });
+
+  // One scope, composed into every aggregate below. Without it another
+  // company's call volume would be attributed to this company's roster.
+  const scope = visibleCalls(me);
 
   // Per-member activity, in grouped queries rather than one pass per user.
   const [callsToday, interested, completedAll] = await Promise.all([
     db.call.groupBy({
       by: ['contactId'],
-      where: { startedAt: { gte: startOfDay } },
+      where: { ...scope, startedAt: { gte: startOfDay } },
       _count: true,
     }),
-    db.call.groupBy({ by: ['contactId'], where: { interested: true }, _count: true }),
+    db.call.groupBy({ by: ['contactId'], where: { ...scope, interested: true }, _count: true }),
     db.call.groupBy({
       by: ['contactId'],
-      where: { status: CallStatus.completed },
+      where: { ...scope, status: CallStatus.completed },
       _count: true,
     }),
   ]);
 
   // Map contact -> owner so call counts can be attributed to a member.
-  const owners = await db.contact.findMany({ select: { id: true, assignedToId: true } });
+  const owners = await db.contact.findMany({
+    where: visibleContacts(me),
+    select: { id: true, assignedToId: true },
+  });
   const ownerOf = new Map(owners.map((c) => [c.id, c.assignedToId]));
 
   function tally(rows: { contactId: string | null; _count: number }[]) {

@@ -32,6 +32,16 @@ export interface AnalyticsQuery {
   days: number;
   employeeId: string | null;
   agentId: string | null;
+  /**
+   * The tenant these figures describe.
+   *
+   * Required, and first in every predicate below. Null means the platform
+   * owner looking across all companies — which is a deliberate act, not a
+   * default, so it has to be passed explicitly rather than arrived at by
+   * forgetting. Making it a required field means a caller that omits it does
+   * not compile.
+   */
+  companyId: string | null;
 }
 
 /** The scoped variant takes no employee/agent filter — the scope *is* the user. */
@@ -216,8 +226,18 @@ export function parseDays(params: URLSearchParams): number {
     : DEFAULT_DAYS;
 }
 
-/** Read and clamp the query string a client may send. */
-export function parseAnalyticsQuery(params: URLSearchParams): AnalyticsQuery {
+/**
+ * Read and clamp the query string a client may send.
+ *
+ * `companyId` is a separate argument on purpose, and never read from the URL.
+ * A tenant taken from the request is a tenant the caller chooses, which is the
+ * whole attack: ?companyId=<someone else> would otherwise be a working way to
+ * read another company's figures.
+ */
+export function parseAnalyticsQuery(
+  params: URLSearchParams,
+  companyId: string | null
+): AnalyticsQuery {
   const employeeId = (params.get('employeeId') ?? '').trim();
   const agentId = (params.get('agentId') ?? '').trim();
 
@@ -225,6 +245,7 @@ export function parseAnalyticsQuery(params: URLSearchParams): AnalyticsQuery {
     days: parseDays(params),
     employeeId: employeeId || null,
     agentId: agentId || null,
+    companyId,
   };
 }
 
@@ -421,11 +442,20 @@ function toAgentStats(agents: AgentRow[], agg: AgentAggregates): AgentStat[] {
  * Per-employee rows. Company-wide only — the scoped path derives its single row
  * from the totals, which are already filtered to that person.
  */
+// NOTE: takes companyId so the roster it builds is the caller's own staff.
 async function computeEmployeeStats(
   base: Prisma.CallWhereInput[],
   from: Date,
-  employeeId: string | null
+  employeeId: string | null,
+  /**
+   * The tenant. The call aggregates below inherit it through `base`, but the
+   * staff roster, the contact-owner map and the callback counts are separate
+   * queries against separate tables — and each was reading every company's
+   * rows, which put other companies' staff on this company's leaderboard.
+   */
+  companyId: string | null
 ): Promise<EmployeeStat[]> {
+  const scope = companyId ? { companyId } : {};
   // Calls that carry an operator, and campaign calls that do not — the two
   // halves of the attribution rule, each aggregated in one grouped query.
   const attributed: Prisma.CallWhereInput[] = [...base, { startedById: { not: null } }];
@@ -478,9 +508,10 @@ async function computeEmployeeStats(
       where: { AND: [...unattributed, { interested: true }] },
       _count: true,
     }),
-    db.contact.findMany({ select: { id: true, assignedToId: true } }),
+    db.contact.findMany({ where: scope, select: { id: true, assignedToId: true } }),
     db.user.findMany({
       where: {
+        ...scope,
         status: UserStatus.active,
         ...(employeeId ? { id: employeeId } : {}),
       },
@@ -497,6 +528,7 @@ async function computeEmployeeStats(
     db.note.groupBy({
       by: ['authorId'],
       where: {
+        ...scope,
         callbackAt: { not: null },
         createdAt: { gte: from },
         ...(employeeId ? { authorId: employeeId } : {}),
@@ -657,15 +689,24 @@ export async function computeAnalytics(query: AnalyticsQuery): Promise<Analytics
   const from = rangeStart(now, query.days);
 
   const base: Prisma.CallWhereInput[] = [{ startedAt: { gte: from } }];
+  // Tenant first. Every aggregate below composes this array, so scoping here
+  // scopes all of them — totals, the daily series, the funnel, the heatmap and
+  // both breakdowns — rather than each remembering separately.
+  if (query.companyId) base.push({ companyId: query.companyId });
   if (query.agentId) base.push({ agentId: query.agentId });
   if (query.employeeId) base.push(attributedTo(query.employeeId));
 
   const [core, agentAgg, byEmployee, agents, timing, completedCount] = await Promise.all([
     computeCore(base, from, query.days),
     aggregateByAgent(base),
-    computeEmployeeStats(base, from, query.employeeId),
+    computeEmployeeStats(base, from, query.employeeId, query.companyId),
     db.agent.findMany({
-      where: query.agentId ? { id: query.agentId } : {},
+      // Scoped like the calls: an unscoped agent list would name another
+      // company's agents in the breakdown even with every figure at zero.
+      where: {
+        ...(query.companyId ? { companyId: query.companyId } : {}),
+        ...(query.agentId ? { id: query.agentId } : {}),
+      },
       orderBy: { name: 'asc' },
       select: { id: true, name: true, isActive: true },
     }),

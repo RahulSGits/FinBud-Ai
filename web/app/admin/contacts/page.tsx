@@ -2,6 +2,7 @@ import { redirect } from 'next/navigation';
 import { ContactStatus, Role, UserStatus } from '@prisma/client';
 import { db } from '@/lib/db';
 import { getCurrentUser } from '@/lib/auth';
+import { visibleCampaigns, visibleContacts, visibleUsers } from '@/lib/authz';
 import { PageHeader } from '@/components/shell/page-header';
 import { ContactsManager, type ContactRow } from '@/components/contacts/contacts-manager';
 
@@ -33,6 +34,7 @@ export default async function AdminContactsPage() {
 
   const [contacts, counts, employees, campaigns] = await Promise.all([
     db.contact.findMany({
+      where: visibleContacts(user),
       orderBy: { createdAt: 'desc' },
       take: PAGE_SIZE,
       include: {
@@ -49,13 +51,14 @@ export default async function AdminContactsPage() {
         },
       },
     }),
-    db.contact.groupBy({ by: ['status'], _count: true }),
+    db.contact.groupBy({ by: ['status'], where: visibleContacts(user), _count: true }),
     db.user.findMany({
-      where: { role: Role.employee, status: { not: UserStatus.disabled } },
+      where: { ...visibleUsers(user), role: Role.employee, status: { not: UserStatus.disabled } },
       select: { id: true, name: true },
       orderBy: { name: 'asc' },
     }),
     db.campaign.findMany({
+      where: visibleCampaigns(user),
       select: { id: true, name: true },
       orderBy: { createdAt: 'desc' },
     }),

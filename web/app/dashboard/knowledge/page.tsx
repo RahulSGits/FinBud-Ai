@@ -2,6 +2,7 @@ import { redirect } from 'next/navigation';
 import { AlertTriangle, CheckCircle2, FileText, Info, Layers, Loader2 } from 'lucide-react';
 import { db } from '@/lib/db';
 import { getCurrentUser } from '@/lib/auth';
+import { visibleDocuments } from '@/lib/authz';
 import { PageHeader } from '@/components/shell/page-header';
 import { cn } from '@/lib/utils';
 
@@ -27,6 +28,7 @@ export default async function EmployeeKnowledgePage() {
   // One company-wide library, readable by everyone: there is nothing here to
   // scope to the current user. Writing to it stays with the admin screen.
   const docs = await db.document.findMany({
+    where: visibleDocuments(user),
     orderBy: { createdAt: 'desc' },
     take: 200,
     include: {
