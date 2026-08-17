@@ -125,6 +125,12 @@ model Company {
   findings         CallFinding[]
   settings         CompanySetting[]
 
+  // Billing
+  subscriptions Subscription[]
+  invoices      Invoice[]
+  payments      Payment[]
+  refunds       Refund[]
+
   @@index([status])
 }
 
@@ -196,6 +202,8 @@ model User {
   templates        MessageTemplate[] @relation("TemplateCreatedBy")
   messagesSent     Message[]         @relation("MessageSentBy")
   findingsReviewed CallFinding[]
+  paymentsRecorded Payment[]         @relation("PaymentRecordedBy")
+  refundsProcessed Refund[]          @relation("RefundProcessedBy")
 
   @@index([role, status])
 
@@ -852,4 +860,326 @@ model CallFinding {
   @@unique([callId, kind])
   @@index([contactId, state])
   @@index([state, contradicted])
+}
+
+// ===========================================================================
+// BILLING
+//
+// Money is stored in the currency's minor unit — paise for INR — as integers.
+// Never as Float: 0.1 + 0.2 is not 0.3 in binary floating point, and an
+// invoice that disagrees with the sum of its payments by a rounding error is
+// an accounting problem, not a display one. Every amount below is an integer
+// count of paise, and only the presentation layer divides by 100.
+//
+// The database is the source of truth for balances. `Invoice.dueAmount` is
+// maintained here from the payments and refunds actually recorded, so no
+// screen ever computes what is owed — a figure derived twice is a figure that
+// will eventually disagree with itself.
+// ===========================================================================
+
+enum BillingCycle {
+  monthly
+  quarterly
+  yearly
+  /// Charged once, for setup fees and bespoke work.
+  one_time
+}
+
+enum InvoiceStatus {
+  draft
+  issued
+  partially_paid
+  paid
+  /// Derived, never set by hand: past due date with an outstanding balance.
+  overdue
+  cancelled
+}
+
+enum PaymentStatus {
+  pending
+  success
+  failed
+  refunded
+  partially_refunded
+}
+
+/// Where a payment came from. `manual` marks money recorded by a human rather
+/// than confirmed by a gateway, so reconciliation can tell the two apart.
+enum PaymentSource {
+  gateway
+  manual
+}
+
+enum SubscriptionStatus {
+  trial
+  active
+  past_due
+  paused
+  cancelled
+  expired
+}
+
+enum RefundStatus {
+  pending
+  processed
+  failed
+}
+
+/// A sellable plan. Prices are per billing cycle, in minor units.
+model Plan {
+  id   String @id @default(uuid())
+  name String
+  slug String @unique
+
+  /// Minor units (paise). 25000 rupees is 2_500_000.
+  priceMinor Int
+  currency   String       @default("INR")
+  cycle      BillingCycle @default(monthly)
+
+  description String?
+  isActive    Boolean @default(true)
+  /// Ordering in the pricing table; lower shows first.
+  sortOrder   Int     @default(0)
+
+  // Limits granted by this plan. Null means no ceiling, matching Company.
+  maxUsers       Int?
+  maxAgents      Int?
+  maxCampaigns   Int?
+  maxContacts    Int?
+  maxCallsPerDay Int?
+  maxCallMinutes Int?
+  maxConcurrent  Int?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  subscriptions Subscription[]
+  invoices      Invoice[]
+
+  @@index([isActive, sortOrder])
+}
+
+/// What a company is currently signed up to.
+model Subscription {
+  id String @id @default(uuid())
+
+  companyId String
+  company   Company @relation(fields: [companyId], references: [id], onDelete: Cascade)
+
+  planId String
+  plan   Plan   @relation(fields: [planId], references: [id])
+
+  status SubscriptionStatus @default(active)
+  cycle  BillingCycle       @default(monthly)
+
+  /// The agreed price, copied from the plan at signup. A later price change to
+  /// the plan must not silently reprice an existing customer.
+  priceMinor Int
+  currency   String @default("INR")
+
+  startedAt      DateTime  @default(now())
+  currentEnd     DateTime?
+  nextBillingAt  DateTime?
+  cancelledAt    DateTime?
+  autoRenew      Boolean   @default(true)
+
+  /// The gateway's own subscription id, when one exists.
+  gatewayRef String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  invoices Invoice[]
+
+  @@index([companyId, status])
+  @@index([nextBillingAt])
+}
+
+model Invoice {
+  id String @id @default(uuid())
+
+  companyId String
+  company   Company @relation(fields: [companyId], references: [id], onDelete: Cascade)
+
+  subscriptionId String?
+  subscription   Subscription? @relation(fields: [subscriptionId], references: [id], onDelete: SetNull)
+
+  planId String?
+  plan   Plan?   @relation(fields: [planId], references: [id], onDelete: SetNull)
+
+  /// Human-facing, sequential and unique: INV-2026-00124.
+  number String @unique
+
+  status InvoiceStatus @default(draft)
+
+  // --- money, all minor units ----------------------------------------------
+  subtotalMinor Int
+  discountMinor Int @default(0)
+  taxMinor      Int @default(0)
+  totalMinor    Int
+  paidMinor     Int @default(0)
+  refundedMinor Int @default(0)
+  /// total - paid + refunded. Maintained by the server so no screen recomputes
+  /// it; a balance derived in two places eventually disagrees with itself.
+  dueMinor      Int
+  currency      String @default("INR")
+
+  // --- tax breakdown, so an Indian invoice can show CGST/SGST or IGST ------
+  cgstMinor Int @default(0)
+  sgstMinor Int @default(0)
+  igstMinor Int @default(0)
+  taxRate   Float?
+
+  periodStart DateTime?
+  periodEnd   DateTime?
+  issueDate   DateTime  @default(now())
+  dueDate     DateTime
+  paidAt      DateTime?
+  cancelledAt DateTime?
+
+  notes String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  items     InvoiceItem[]
+  payments  Payment[]
+  refunds   Refund[]
+  reminders PaymentReminder[]
+
+  @@index([companyId, status])
+  @@index([status, dueDate])
+  @@index([dueDate])
+}
+
+model InvoiceItem {
+  id String @id @default(uuid())
+
+  invoiceId String
+  invoice   Invoice @relation(fields: [invoiceId], references: [id], onDelete: Cascade)
+
+  description String
+  quantity    Int    @default(1)
+  unitMinor   Int
+  amountMinor Int
+
+  createdAt DateTime @default(now())
+
+  @@index([invoiceId])
+}
+
+model Payment {
+  id String @id @default(uuid())
+
+  companyId String
+  company   Company @relation(fields: [companyId], references: [id], onDelete: Cascade)
+
+  /// Nullable: a gateway can send money that matches no invoice, and that is
+  /// precisely the case reconciliation must surface rather than discard.
+  invoiceId String?
+  invoice   Invoice? @relation(fields: [invoiceId], references: [id], onDelete: SetNull)
+
+  amountMinor   Int
+  refundedMinor Int    @default(0)
+  currency      String @default("INR")
+
+  status PaymentStatus @default(pending)
+  source PaymentSource @default(gateway)
+
+  gateway       String?
+  /// The gateway's payment id (Razorpay `pay_…`). Unique so replaying a
+  /// webhook cannot record the same money twice.
+  gatewayRef    String? @unique
+  paymentMethod String?
+
+  /// Set only when source is manual: the cheque number, NEFT reference, etc.
+  manualRef    String?
+  recordedById String?
+  recordedBy   User?   @relation("PaymentRecordedBy", fields: [recordedById], references: [id], onDelete: SetNull)
+
+  paidAt    DateTime?
+  failedAt  DateTime?
+  /// The gateway's own failure text, kept verbatim for support.
+  failureReason String?
+
+  metadata Json?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  refunds Refund[]
+
+  @@index([companyId, status])
+  @@index([invoiceId])
+  @@index([paidAt])
+}
+
+model Refund {
+  id String @id @default(uuid())
+
+  companyId String
+  company   Company @relation(fields: [companyId], references: [id], onDelete: Cascade)
+
+  paymentId String
+  payment   Payment @relation(fields: [paymentId], references: [id], onDelete: Cascade)
+
+  invoiceId String?
+  invoice   Invoice? @relation(fields: [invoiceId], references: [id], onDelete: SetNull)
+
+  amountMinor Int
+  currency    String @default("INR")
+  reason      String?
+
+  status RefundStatus @default(pending)
+  /// The gateway's refund id. Unique for the same replay reason as payments.
+  gatewayRef String? @unique
+
+  processedById String?
+  processedBy   User?   @relation("RefundProcessedBy", fields: [processedById], references: [id], onDelete: SetNull)
+
+  processedAt DateTime?
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+
+  @@index([companyId, status])
+  @@index([paymentId])
+}
+
+/// One row per reminder actually sent, so a schedule change cannot cause a
+/// customer to be chased twice for the same stage.
+model PaymentReminder {
+  id String @id @default(uuid())
+
+  invoiceId String
+  invoice   Invoice @relation(fields: [invoiceId], references: [id], onDelete: Cascade)
+
+  /// Days relative to the due date: -7 is a week before, +3 is three days late.
+  offsetDays Int
+  sentAt     DateTime @default(now())
+  channel    String   @default("email")
+
+  @@unique([invoiceId, offsetDays])
+  @@index([invoiceId])
+}
+
+/// Every gateway event we have already handled.
+///
+/// Gateways retry, and a retried `payment.captured` must not record the money a
+/// second time. The unique event id is what makes handling idempotent.
+model BillingEvent {
+  id String @id @default(uuid())
+
+  gateway String
+  /// The gateway's event id.
+  eventId String
+  type    String
+
+  payload    Json
+  handledAt  DateTime?
+  error      String?
+
+  createdAt DateTime @default(now())
+
+  @@unique([gateway, eventId])
+  @@index([type, createdAt])
 }
