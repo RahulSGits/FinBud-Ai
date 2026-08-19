@@ -3,7 +3,7 @@ import { CallStatus, Role } from '@prisma/client';
 import { BadgeCheck } from 'lucide-react';
 import { db } from '@/lib/db';
 import { getCurrentUser } from '@/lib/auth';
-import { visibleCalls, visibleContacts, visibleUsers } from '@/lib/authz';
+import { canUseAdminArea, visibleCalls, visibleContacts, visibleUsers } from '@/lib/authz';
 import { PageHeader } from '@/components/shell/page-header';
 import { TeamManager, type TeamMember } from '@/components/team/team-manager';
 
@@ -17,7 +17,7 @@ export default async function TeamPage() {
   // every client-side navigation, so the page owns its own gate.
   const me = await getCurrentUser();
   if (!me) redirect('/login');
-  if (me.role !== Role.admin) redirect('/dashboard');
+  if (!canUseAdminArea(me)) redirect('/dashboard');
 
   // Admins first, then by employee id rather than by name. Employee ids are
   // assigned in joining order, so the roster reads the way the team actually

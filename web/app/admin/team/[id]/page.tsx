@@ -4,6 +4,7 @@ import { ChevronLeft } from 'lucide-react';
 import { Prisma, Role, UserStatus } from '@prisma/client';
 import { db } from '@/lib/db';
 import { getCurrentUser } from '@/lib/auth';
+import { canUseAdminArea } from '@/lib/authz';
 import { PageHeader } from '@/components/shell/page-header';
 import {
   EmployeeDetail,
@@ -44,7 +45,7 @@ export default async function EmployeePage({ params }: { params: { id: string } 
   if (!user) redirect('/login');
   // middleware.ts already keeps employees out of /admin, but routing is not the
   // security boundary — the page re-checks for itself.
-  if (user.role !== 'admin') redirect('/dashboard');
+  if (!canUseAdminArea(user)) redirect('/dashboard');
 
   const target = await db.user.findUnique({
     where: { id: params.id },

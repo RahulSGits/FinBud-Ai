@@ -1,5 +1,6 @@
 import { redirect } from 'next/navigation';
 import { getCurrentUser } from '@/lib/auth';
+import { canUseAdminArea } from '@/lib/authz';
 import { PageHeader } from '@/components/shell/page-header';
 import { DEFAULT_DAYS, computeAnalytics } from '@/lib/analytics';
 import { AnalyticsDashboard } from '@/components/analytics/analytics-dashboard';
@@ -17,7 +18,7 @@ export const dynamic = 'force-dynamic';
 export default async function AnalyticsPage() {
   const user = await getCurrentUser();
   if (!user) redirect('/login');
-  if (user.role !== 'admin') redirect('/dashboard');
+  if (!canUseAdminArea(user)) redirect('/dashboard');
 
   const initial = await computeAnalytics({
     days: DEFAULT_DAYS,

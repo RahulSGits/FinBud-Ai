@@ -3,7 +3,7 @@ import { Bot, Plus, PhoneCall, Megaphone, Mic, Languages, CheckCircle2, CloudOff
 import { redirect } from 'next/navigation';
 import { db } from '@/lib/db';
 import { getCurrentUser } from '@/lib/auth';
-import { visibleAgents } from '@/lib/authz';
+import { canUseAdminArea, visibleAgents } from '@/lib/authz';
 import { getProvider } from '@/lib/providers';
 import { PageHeader } from '@/components/shell/page-header';
 import { cn } from '@/lib/utils';
@@ -25,7 +25,7 @@ export default async function AgentsPage() {
   // every client-side navigation, so the page owns its own gate.
   const user = await getCurrentUser();
   if (!user) redirect('/login');
-  if (user.role !== 'admin') redirect('/dashboard');
+  if (!canUseAdminArea(user)) redirect('/dashboard');
 
   const agents = await db.agent.findMany({
     where: visibleAgents(user),

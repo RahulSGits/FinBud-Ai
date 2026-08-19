@@ -3,7 +3,7 @@ import { CalendarClock, Clock, Megaphone } from 'lucide-react';
 import { redirect } from 'next/navigation';
 import { db } from '@/lib/db';
 import { getCurrentUser } from '@/lib/auth';
-import { visibleAgents, visibleCalls, visibleCampaigns, visibleContacts } from '@/lib/authz';
+import { canUseAdminArea, visibleAgents, visibleCalls, visibleCampaigns, visibleContacts } from '@/lib/authz';
 import { PageHeader } from '@/components/shell/page-header';
 import { CampaignControls } from '@/components/campaigns/campaign-controls';
 import { CampaignForm, DeleteCampaignButton } from '@/components/campaigns/campaign-form';
@@ -35,7 +35,7 @@ export default async function CampaignsPage() {
   // every client-side navigation, so the page owns its own gate.
   const user = await getCurrentUser();
   if (!user) redirect('/login');
-  if (user.role !== 'admin') redirect('/dashboard');
+  if (!canUseAdminArea(user)) redirect('/dashboard');
 
   const [campaigns, agents, unassignedCount] = await Promise.all([
     db.campaign.findMany({

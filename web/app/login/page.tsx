@@ -22,7 +22,11 @@ export default function LoginPage() {
 
   useEffect(() => {
     if (user) {
-      if (user.role === 'admin') {
+      // The platform owner has no company, so neither company area would show
+      // them anything.
+      if (user.role === 'super_admin') {
+        router.replace('/platform');
+      } else if (user.role === 'admin') {
         router.replace('/admin');
       } else {
         router.replace('/dashboard');

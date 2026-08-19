@@ -1,6 +1,7 @@
 import { redirect } from 'next/navigation';
 import { db } from '@/lib/db';
 import { getCurrentUser } from '@/lib/auth';
+import { canUseAdminArea } from '@/lib/authz';
 import { defaultProviderId, isMockMode, listProviders } from '@/lib/providers';
 import { parseBusinessHours } from '@/lib/campaigns/business-hours';
 import { PageHeader } from '@/components/shell/page-header';
@@ -32,7 +33,7 @@ function whole(raw: unknown, fallback: number, min: number): number {
 export default async function SettingsPage() {
   const user = await getCurrentUser();
   if (!user) redirect('/login');
-  if (user.role !== 'admin') redirect('/dashboard');
+  if (!canUseAdminArea(user)) redirect('/dashboard');
 
   const [rows, providers] = await Promise.all([db.setting.findMany(), listProviders()]);
   const stored = new Map<string, unknown>(rows.map((r) => [r.key, r.value as unknown]));

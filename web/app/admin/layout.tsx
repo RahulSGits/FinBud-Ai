@@ -1,5 +1,6 @@
 import { redirect } from 'next/navigation';
 import { getCurrentUser } from '@/lib/auth';
+import { canUseAdminArea } from '@/lib/authz';
 import { Nav } from '@/components/shell/nav';
 import { AmbientBackground } from '@/components/ui/ambient-background';
 
@@ -12,7 +13,7 @@ export default async function AdminLayout({ children }: { children: React.ReactN
   if (!user) redirect('/login');
   // Force the first-login password change before any dashboard access.
   if (user.mustChangePassword) redirect('/change-password');
-  if (user.role !== 'admin') redirect('/dashboard');
+  if (!canUseAdminArea(user)) redirect('/dashboard');
 
   return (
     <div className="relative lg:flex min-h-screen bg-slate-50 dark:bg-[#020617]">

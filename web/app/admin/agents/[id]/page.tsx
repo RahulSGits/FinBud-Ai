@@ -3,6 +3,7 @@ import { notFound, redirect } from 'next/navigation';
 import { ChevronLeft } from 'lucide-react';
 import { db } from '@/lib/db';
 import { getCurrentUser } from '@/lib/auth';
+import { canUseAdminArea } from '@/lib/authz';
 import { PageHeader } from '@/components/shell/page-header';
 import { AgentBuilder } from '@/components/agents/agent-builder';
 
@@ -15,7 +16,7 @@ function plural(n: number, word: string): string {
 export default async function AgentPage({ params }: { params: { id: string } }) {
   const user = await getCurrentUser();
   if (!user) redirect('/login');
-  if (user.role !== 'admin') redirect('/dashboard');
+  if (!canUseAdminArea(user)) redirect('/dashboard');
 
   const agent = await db.agent.findUnique({
     where: { id: params.id },

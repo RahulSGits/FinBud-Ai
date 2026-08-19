@@ -14,9 +14,7 @@ import {
 import { redirect } from 'next/navigation';
 import { db } from '@/lib/db';
 import { getCurrentUser } from '@/lib/auth';
-import {
-  visibleAgents, visibleCalls, visibleCampaigns, visibleContacts, visibleUsers,
-} from '@/lib/authz';
+import { canUseAdminArea, visibleAgents, visibleCalls, visibleCampaigns, visibleContacts, visibleUsers } from '@/lib/authz';
 import { PageHeader } from '@/components/shell/page-header';
 import { LiveCallsPanel } from '@/components/voice/live-calls-panel';
 import { cn } from '@/lib/utils';
@@ -43,7 +41,7 @@ export default async function AdminOverview() {
   // every client-side navigation, so the page owns its own gate.
   const user = await getCurrentUser();
   if (!user) redirect('/login');
-  if (user.role !== 'admin') redirect('/dashboard');
+  if (!canUseAdminArea(user)) redirect('/dashboard');
 
   const startOfDay = new Date();
   startOfDay.setHours(0, 0, 0, 0);

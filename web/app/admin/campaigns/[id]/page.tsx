@@ -3,6 +3,7 @@ import { notFound, redirect } from 'next/navigation';
 import { ChevronLeft } from 'lucide-react';
 import { db } from '@/lib/db';
 import { getCurrentUser } from '@/lib/auth';
+import { canUseAdminArea } from '@/lib/authz';
 import { PageHeader } from '@/components/shell/page-header';
 import {
   CampaignDetail,
@@ -17,7 +18,7 @@ export default async function AdminCampaignPage({ params }: { params: { id: stri
   if (!user) redirect('/login');
   // middleware.ts already keeps employees out of /admin, but routing is not the
   // security boundary — the page re-checks for itself.
-  if (user.role !== 'admin') redirect('/dashboard');
+  if (!canUseAdminArea(user)) redirect('/dashboard');
 
   const campaign = await db.campaign.findUnique({
     where: { id: params.id },

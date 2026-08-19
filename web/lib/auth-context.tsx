@@ -7,7 +7,10 @@ export interface SessionUser {
   id: string;
   email: string;
   name: string;
-  role: 'admin' | 'employee';
+  // Kept in step with the Role enum by hand: this is the client's view of the
+  // session, and a role missing here is a comparison TypeScript quietly calls
+  // impossible rather than an error anyone sees.
+  role: 'super_admin' | 'admin' | 'manager' | 'employee' | 'viewer';
   employeeId?: string | null;
   mustChangePassword?: boolean;
 }

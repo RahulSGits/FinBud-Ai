@@ -38,6 +38,19 @@ export function isAdmin(user: SessionUser): boolean {
 }
 
 /** Throwing guard for handlers that have already resolved a user. */
+/**
+ * May this caller use the company-administrator area?
+ *
+ * Admins, plus the platform owner — who needs to see a company's own screens to
+ * support it. Every /admin page previously tested `role !== 'admin'` directly,
+ * which bounced a super_admin to /dashboard; having no company they cannot use
+ * that either, so the account was locked out of the whole application. One
+ * predicate rather than fifteen copies of the comparison.
+ */
+export function canUseAdminArea(user: SessionUser): boolean {
+  return user.role === Role.admin || isSuperAdmin(user);
+}
+
 export function assertAdmin(user: SessionUser): void {
   if (!isAdmin(user)) throw new AuthError('Forbidden', 403);
 }

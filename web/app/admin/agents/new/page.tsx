@@ -1,5 +1,6 @@
 import { redirect } from 'next/navigation';
 import { getCurrentUser } from '@/lib/auth';
+import { canUseAdminArea } from '@/lib/authz';
 import { PageHeader } from '@/components/shell/page-header';
 import { AgentBuilder } from '@/components/agents/agent-builder';
 
@@ -10,7 +11,7 @@ export default async function NewAgentPage() {
   // every client-side navigation, so the page owns its own gate.
   const user = await getCurrentUser();
   if (!user) redirect('/login');
-  if (user.role !== 'admin') redirect('/dashboard');
+  if (!canUseAdminArea(user)) redirect('/dashboard');
 
   return (
     <>

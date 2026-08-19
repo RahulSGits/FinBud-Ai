@@ -1,7 +1,7 @@
 import { redirect } from 'next/navigation';
 import { db } from '@/lib/db';
 import { getCurrentUser } from '@/lib/auth';
-import { visibleDocuments } from '@/lib/authz';
+import { canUseAdminArea, visibleDocuments } from '@/lib/authz';
 import { PageHeader } from '@/components/shell/page-header';
 import { KnowledgeManager, type KnowledgeDoc } from '@/components/knowledge/knowledge-manager';
 
@@ -10,7 +10,7 @@ export const dynamic = 'force-dynamic';
 export default async function KnowledgePage() {
   const user = await getCurrentUser();
   if (!user) redirect('/login');
-  if (user.role !== 'admin') redirect('/dashboard');
+  if (!canUseAdminArea(user)) redirect('/dashboard');
 
   const docs = await db.document.findMany({
     where: visibleDocuments(user),

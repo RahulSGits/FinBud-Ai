@@ -2,7 +2,7 @@ import { redirect } from 'next/navigation';
 import { ContactStatus, Role, UserStatus } from '@prisma/client';
 import { db } from '@/lib/db';
 import { getCurrentUser } from '@/lib/auth';
-import { visibleCampaigns, visibleContacts, visibleUsers } from '@/lib/authz';
+import { canUseAdminArea, visibleCampaigns, visibleContacts, visibleUsers } from '@/lib/authz';
 import { PageHeader } from '@/components/shell/page-header';
 import { ContactsManager, type ContactRow } from '@/components/contacts/contacts-manager';
 
@@ -30,7 +30,7 @@ function asRecord(value: unknown): Record<string, unknown> | null {
 export default async function AdminContactsPage() {
   const user = await getCurrentUser();
   if (!user) redirect('/login');
-  if (user.role !== Role.admin) redirect('/dashboard');
+  if (!canUseAdminArea(user)) redirect('/dashboard');
 
   const [contacts, counts, employees, campaigns] = await Promise.all([
     db.contact.findMany({

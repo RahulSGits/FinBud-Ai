@@ -55,7 +55,9 @@ export function ChangePasswordForm({
     // Cleared mustChangePassword server-side; land on the right dashboard.
     // Anyone who administers something lands on the admin surface; everyone
     // else on their own dashboard.
-    router.push(role === 'super_admin' || role === 'admin' ? '/admin' : '/dashboard');
+    router.push(
+      role === 'super_admin' ? '/platform' : role === 'admin' ? '/admin' : '/dashboard'
+    );
     router.refresh();
   }
 

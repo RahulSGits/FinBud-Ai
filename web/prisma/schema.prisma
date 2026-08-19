@@ -152,14 +152,20 @@ model CompanySetting {
 
 model User {
 
-  /// The tenant this row belongs to.
+  /// The tenant this person belongs to — null only for the platform owner.
   ///
-  /// Required, deliberately: a nullable column let a create quietly omit it,
-  /// and such a row is invisible to every scope while — because NULL never
-  /// collides in a Postgres unique index — still slipping past the composite
-  /// uniques. Required makes each omission a compile error instead.
-  companyId String
-  tenant    Company @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  /// Every other model keeps this required, because a nullable column let a
+  /// create quietly omit it and such a row is invisible to every scope. User is
+  /// the one genuine exception: a super_admin belongs to no company, which is
+  /// precisely what lets them see across all of them.
+  ///
+  /// Nullable here would reopen exactly the hole Phase 2 closed, so the rule is
+  /// moved into the database instead — see the CHECK constraint in migration
+  /// 20260819100000_platform_owner: null is permitted for super_admin and
+  /// forbidden for everyone else. The type system stops enforcing it; the
+  /// database starts.
+  companyId String?
+  tenant    Company? @relation(fields: [companyId], references: [id], onDelete: Cascade)
   id    String @id @default(uuid())
   email String @unique
   name  String

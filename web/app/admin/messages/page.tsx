@@ -1,6 +1,7 @@
 import { redirect } from 'next/navigation';
 import { db } from '@/lib/db';
 import { getCurrentUser } from '@/lib/auth';
+import { canUseAdminArea } from '@/lib/authz';
 import { PageHeader } from '@/components/shell/page-header';
 import { TemplateManager, type TemplateRow } from '@/components/messaging/template-manager';
 
@@ -11,7 +12,7 @@ export default async function AdminMessagesPage() {
   // every client-side navigation, so the page owns its own gate.
   const user = await getCurrentUser();
   if (!user) redirect('/login');
-  if (user.role !== 'admin') redirect('/dashboard');
+  if (!canUseAdminArea(user)) redirect('/dashboard');
 
   const rows = await db.messageTemplate.findMany({
     orderBy: { updatedAt: 'desc' },
