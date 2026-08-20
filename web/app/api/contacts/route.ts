@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { ContactStatus, Role } from '@prisma/client';
 import { db } from '@/lib/db';
+import { auditData } from '@/lib/audit';
 import { AuthError, requireUser } from '@/lib/auth';
 import { isAdmin, visibleContacts } from '@/lib/authz';
 import { normalisePhone } from '@/lib/contacts/phone';
@@ -135,10 +136,10 @@ export async function POST(req: NextRequest) {
   }
 
   await db.auditLog.create({
-    data: {
-      action: 'contacts.imported', entity: 'Contact', userId: user.id, companyId,
+    data: auditData(user, {
+      action: 'contacts.imported', entity: 'Contact', companyId,
       meta: { created, updated, invalid: invalid.length, skippedNotYours, skippedDoNotCall },
-    },
+    }),
   });
 
   return NextResponse.json({
@@ -202,13 +203,12 @@ export async function PATCH(req: NextRequest) {
       );
     }
     await db.auditLog.create({
-      data: {
+      data: auditData(user, {
         action: 'contact.do_not_call_lifted',
         entity: 'Contact',
         entityId: id,
-        userId: user.id,
         meta: { to: data.status },
-      },
+      }),
     }).catch(() => undefined);
   }
 
@@ -233,7 +233,7 @@ export async function DELETE(req: NextRequest) {
 
   await db.contact.delete({ where: { id } });
   await db.auditLog.create({
-    data: { action: 'contact.deleted', entity: 'Contact', entityId: id, userId: user.id },
+    data: auditData(user, { action: 'contact.deleted', entity: 'Contact', entityId: id }),
   }).catch(() => undefined);
 
   return NextResponse.json({ ok: true });

@@ -6,7 +6,7 @@ import { Eye, EyeOff, Loader2, AlertCircle, Zap } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
-import { useAuth } from '@/lib/auth-context';
+import { homeFor, useAuth } from '@/lib/auth-context';
 import { toast } from 'sonner';
 import { FinanceBuddhaLogo } from '@/components/brand/logo';
 import { ThemeToggle } from '@/components/theme-toggle';
@@ -21,17 +21,9 @@ export default function LoginPage() {
   const router = useRouter();
 
   useEffect(() => {
-    if (user) {
-      // The platform owner has no company, so neither company area would show
-      // them anything.
-      if (user.role === 'super_admin') {
-        router.replace('/platform');
-      } else if (user.role === 'admin') {
-        router.replace('/admin');
-      } else {
-        router.replace('/dashboard');
-      }
-    }
+    // One table of landing routes, shared with signIn — so an already-signed-in
+    // visitor and a fresh sign-in cannot disagree about where a role belongs.
+    if (user) router.replace(homeFor(user.role));
   }, [user, router]);
 
   const handleSubmit = async (e: React.FormEvent) => {

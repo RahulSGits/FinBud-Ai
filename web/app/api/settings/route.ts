@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { Prisma } from '@prisma/client';
 import { db } from '@/lib/db';
+import { auditData } from '@/lib/audit';
 import { AuthError, requireAdmin } from '@/lib/auth';
 
 // Platform defaults, stored one row per key in the Setting singleton table.
@@ -179,12 +180,11 @@ export async function PATCH(req: NextRequest) {
   );
 
   await db.auditLog.create({
-    data: {
+    data: auditData(admin, {
       action: 'settings.updated',
       entity: 'Setting',
-      userId: admin.id,
       meta: { keys: updates.map((u) => u.key) },
-    },
+    }),
   });
 
   return NextResponse.json({

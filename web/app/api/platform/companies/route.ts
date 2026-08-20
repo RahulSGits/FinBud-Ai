@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { CompanyStatus, Role } from '@prisma/client';
 import { db } from '@/lib/db';
+import { auditData } from '@/lib/audit';
 import { DEFAULT_PASSWORD, hashPassword, requireUser, type SessionUser } from '@/lib/auth';
 import { assertSuperAdmin, errorResponse } from '@/lib/authz';
 
@@ -141,13 +142,15 @@ export async function POST(req: NextRequest) {
     });
 
     await tx.auditLog.create({
-      data: {
+      data: auditData(actor, {
         action: 'company.created',
         entity: 'Company',
         entityId: company.id,
-        userId: actor.id,
+        // Filed under the new company rather than under the owner, who belongs
+        // to none: this is the first line of that customer's own history.
+        companyId: company.id,
         meta: { name, slug, adminEmail },
-      },
+      }),
     });
 
     return { company, admin };

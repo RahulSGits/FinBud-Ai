@@ -6,6 +6,7 @@
 // call are indistinguishable downstream.
 import { CallStatus, ContactStatus, Role } from '@prisma/client';
 import { db } from '../db';
+import { auditData } from '../audit';
 import { normalisePhone } from '../contacts/phone';
 import { agentToConfig, getProvider, isMockMode } from '../providers';
 import { noteDispatchOutcome } from '../providers/usage';
@@ -212,7 +213,7 @@ export async function placeCall(opts: {
       },
     });
     await db.auditLog.create({
-      data: { action: 'call.started', entity: 'Call', entityId: call.id, userId: opts.user.id },
+      data: auditData(opts.user, { action: 'call.started', entity: 'Call', entityId: call.id }),
     });
     // Proof the account can pay for calls, which clears any standing
     // out-of-credit warning without anyone having to dismiss it.
@@ -360,13 +361,12 @@ export async function placeManualCall(opts: {
   });
 
   await db.auditLog.create({
-    data: {
+    data: auditData(opts.user, {
       action: 'call.manual',
       entity: 'Call',
       entityId: result.callId,
-      userId: opts.user.id,
       meta: { phone, contactId: resolved.contactId, contactCreated: resolved.created },
-    },
+    }),
   });
 
   return { ...result, contactId: resolved.contactId, contactCreated: resolved.created };

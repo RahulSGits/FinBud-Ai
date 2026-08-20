@@ -9,6 +9,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { CampaignStatus, ContactStatus, Prisma } from '@prisma/client';
 import { db } from '@/lib/db';
+import { auditData } from '@/lib/audit';
 import { requireUser } from '@/lib/auth';
 import { errorResponse, requireCompany, visibleAgents, visibleContacts } from '@/lib/authz';
 import { describeWindow, isWithinBusinessHours, parseBusinessHours } from '@/lib/campaigns/business-hours';
@@ -229,11 +230,10 @@ export async function POST(req: NextRequest) {
 
   // Written before the first tick so the record survives a dial that throws.
   await db.auditLog.create({
-    data: {
+    data: auditData(user, {
       action: 'campaign.bulk_started',
       entity: 'Campaign',
       entityId: campaign.id,
-      userId: user.id,
       meta: {
         requested: requestedIds.length,
         queued: attached.count,
@@ -244,7 +244,7 @@ export async function POST(req: NextRequest) {
         agentId: agent.id,
         concurrency: campaign.concurrency,
       },
-    },
+    }),
   });
 
   // Dial immediately so the user sees movement instead of waiting for the

@@ -6,6 +6,7 @@
 // downstream. Routes stay thin and cannot forget a check.
 import { ContactStatus, MessageStatus, Prisma } from '@prisma/client';
 import { db } from '../db';
+import { auditData } from '../audit';
 import type { SessionUser } from '../auth';
 import { isAdmin, visibleCalls, visibleContacts } from '../authz';
 import { normalisePhone } from '../contacts/phone';
@@ -304,13 +305,12 @@ export async function sendMessage(input: SendMessageInput): Promise<SendResult> 
   };
 
   await db.auditLog.create({
-    data: {
+    data: auditData(user, {
       action: 'message.sent',
       entity: 'Message',
       entityId: message.id,
-      userId: user.id,
       meta,
-    },
+    }),
   });
 
   return result;

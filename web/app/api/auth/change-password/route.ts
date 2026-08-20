@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { db } from '@/lib/db';
+import { auditData } from '@/lib/audit';
 import {
   AuthError, DEFAULT_PASSWORD, hashPassword, requireUser, validatePassword, verifyPassword,
 } from '@/lib/auth';
@@ -44,7 +45,7 @@ export async function POST(req: NextRequest) {
   });
 
   await db.auditLog.create({
-    data: { action: 'password.changed', entity: 'User', entityId: user.id, userId: user.id },
+    data: auditData(user, { action: 'password.changed', entity: 'User', entityId: user.id }),
   });
 
   return NextResponse.json({ ok: true });

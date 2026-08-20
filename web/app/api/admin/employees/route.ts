@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { Role, UserStatus } from '@prisma/client';
 import { db } from '@/lib/db';
+import { auditData } from '@/lib/audit';
 import { AuthError, DEFAULT_PASSWORD, hashPassword, requireAdmin } from '@/lib/auth';
 import { requireCompany } from '@/lib/authz';
 
@@ -96,10 +97,9 @@ export async function POST(req: NextRequest) {
   });
 
   await db.auditLog.create({
-    data: {
-      action: 'employee.created', entity: 'User', entityId: user.id,
-      userId: admin.id, meta: { email, employeeId, role },
-    },
+    data: auditData(admin, {
+      action: 'employee.created', entity: 'User', entityId: user.id, meta: { email, employeeId, role },
+    }),
   });
 
   return NextResponse.json({
@@ -170,10 +170,10 @@ export async function PATCH(req: NextRequest) {
 
   const user = await db.user.update({ where: { id }, data });
   await db.auditLog.create({
-    data: {
+    data: auditData(admin, {
       action: body.resetPassword ? 'employee.password_reset' : 'employee.updated',
-      entity: 'User', entityId: id, userId: admin.id, meta: { changed: Object.keys(data) },
-    },
+      entity: 'User', entityId: id, meta: { changed: Object.keys(data) },
+    }),
   });
 
   return NextResponse.json({
@@ -212,7 +212,7 @@ export async function DELETE(req: NextRequest) {
   await db.contact.updateMany({ where: { assignedToId: id }, data: { assignedToId: null } });
 
   await db.auditLog.create({
-    data: { action: 'employee.disabled', entity: 'User', entityId: id, userId: admin.id },
+    data: auditData(admin, { action: 'employee.disabled', entity: 'User', entityId: id }),
   });
   return NextResponse.json({ ok: true });
 }

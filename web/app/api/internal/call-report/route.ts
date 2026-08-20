@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { db } from '@/lib/db';
+import { auditData } from '@/lib/audit';
 import { applyCallReport } from '@/lib/livekit/report';
 
 function authorised(req: NextRequest): boolean {
@@ -33,8 +34,20 @@ export async function POST(req: NextRequest) {
       recordingUrl: body.recordingUrl ?? null,
     });
 
+    // No actor — this is the calling worker reporting in — but the call
+    // itself knows whose it is, and an entry filed under no tenant is one the
+    // company can never see in its own history.
+    const call = await db.call
+      .findUnique({ where: { id: String(body.callLogId) }, select: { companyId: true } })
+      .catch(() => null);
+
     await db.auditLog.create({
-      data: { action: 'call.reported', entity: 'Call', entityId: String(body.callLogId) },
+      data: auditData(null, {
+        action: 'call.reported',
+        entity: 'Call',
+        entityId: String(body.callLogId),
+        companyId: call?.companyId ?? null,
+      }),
     }).catch(() => {});
 
     return NextResponse.json({ ok: true });

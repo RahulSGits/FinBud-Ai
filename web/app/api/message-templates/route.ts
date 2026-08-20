@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { LeadStatus, Prisma } from '@prisma/client';
 import { db } from '@/lib/db';
+import { auditData } from '@/lib/audit';
 import { requireUser } from '@/lib/auth';
 import { assertOwner, errorResponse, requireCompany } from '@/lib/authz';
 import { extractPlaceholders } from '@/lib/messaging/render';
@@ -150,12 +151,11 @@ export async function POST(req: NextRequest) {
   });
 
   await db.auditLog.create({
-    data: {
+    data: auditData(user, {
       action: 'template.created',
       entity: 'MessageTemplate',
       entityId: template.id,
-      userId: user.id,
-    },
+    }),
   });
 
   return NextResponse.json(toDTO(template), { status: 201 });
@@ -234,12 +234,11 @@ export async function PATCH(req: NextRequest) {
   });
 
   await db.auditLog.create({
-    data: {
+    data: auditData(user, {
       action: 'template.updated',
       entity: 'MessageTemplate',
       entityId: template.id,
-      userId: user.id,
-    },
+    }),
   });
 
   return NextResponse.json(toDTO(template));
@@ -276,12 +275,11 @@ export async function DELETE(req: NextRequest) {
   await db.messageTemplate.delete({ where: { id: existing.id } });
 
   await db.auditLog.create({
-    data: {
+    data: auditData(user, {
       action: 'template.deleted',
       entity: 'MessageTemplate',
       entityId: existing.id,
-      userId: user.id,
-    },
+    }),
   });
 
   return NextResponse.json({ ok: true });

@@ -8,7 +8,7 @@ import { cookies } from 'next/headers';
 import { createHash, randomBytes, timingSafeEqual } from 'crypto';
 import bcrypt from 'bcryptjs';
 import { SignJWT, jwtVerify } from 'jose';
-import { Role, UserStatus } from '@prisma/client';
+import { CompanyStatus, Role, UserStatus } from '@prisma/client';
 import { db } from './db';
 
 const COOKIE = 'finbud_session';
@@ -162,10 +162,23 @@ export const getCurrentUser = cache(async function getCurrentUser(): Promise<Ses
       select: {
         id: true, email: true, name: true, role: true, status: true,
         employeeId: true, mustChangePassword: true, companyId: true,
+        // Read alongside the user, on every request, for the same reason the
+        // user's own row is: a suspension has to take effect now, not whenever
+        // the token happens to expire.
+        tenant: { select: { status: true } },
       },
     });
 
     if (!user || user.status !== UserStatus.active) return null;
+
+    // A company that is suspended or still awaiting approval has no users, as
+    // far as the application is concerned. Without this the suspend control was
+    // decorative: it changed a column and nothing read it, so a suspended
+    // customer kept working — and kept spending money on calls.
+    //
+    // The platform owner has no company and is deliberately unaffected; they
+    // are the one who has to be able to sign in and lift the suspension.
+    if (user.tenant && user.tenant.status !== CompanyStatus.active) return null;
 
     return {
       id: user.id, email: user.email, name: user.name, role: user.role,

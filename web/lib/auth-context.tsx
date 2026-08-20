@@ -26,6 +26,20 @@ interface AuthContextValue {
 
 const AuthContext = createContext<AuthContextValue | null>(null);
 
+/**
+ * Where a role lands after signing in.
+ *
+ * The platform owner belongs to no company, so both company areas would show
+ * them nothing — this used to send them to /dashboard and rely on the login
+ * page's effect to bounce them onward, which meant a visible detour through a
+ * page they cannot use.
+ */
+export function homeFor(role: SessionUser['role']): string {
+  if (role === 'super_admin') return '/platform';
+  if (role === 'admin') return '/admin';
+  return '/dashboard';
+}
+
 export function AuthProvider({ children }: { children: ReactNode }) {
   const [user, setUser] = useState<SessionUser | null>(null);
   const [loading, setLoading] = useState(true);
@@ -59,7 +73,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     setUser(data.user);
     // A first-login account must set its own password before anything else.
     if (data.user.mustChangePassword) router.push('/change-password');
-    else router.push(data.user.role === 'admin' ? '/admin' : '/dashboard');
+    else router.push(homeFor(data.user.role));
     return { ok: true };
   }, [router]);
 
@@ -71,7 +85,16 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   return (
     <AuthContext.Provider
-      value={{ user, loading, isAdmin: user?.role === 'admin', signIn, signOut, refresh }}
+      value={{
+        user,
+        loading,
+        // Matches lib/authz.ts `isAdmin` — the platform owner counts. Two
+        // predicates with the same name that disagree is a trap.
+        isAdmin: user?.role === 'admin' || user?.role === 'super_admin',
+        signIn,
+        signOut,
+        refresh,
+      }}
     >
       {children}
     </AuthContext.Provider>

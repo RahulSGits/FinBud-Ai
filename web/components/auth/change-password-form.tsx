@@ -3,6 +3,7 @@
 import { useRouter } from 'next/navigation';
 import { useState } from 'react';
 import { motion } from 'motion/react';
+import { homeFor } from '@/lib/auth-context';
 import { ShieldCheck, Loader2, AlertCircle, Check, KeyRound } from 'lucide-react';
 
 const RULES = [
@@ -52,12 +53,9 @@ export function ChangePasswordForm({
       return;
     }
 
-    // Cleared mustChangePassword server-side; land on the right dashboard.
-    // Anyone who administers something lands on the admin surface; everyone
-    // else on their own dashboard.
-    router.push(
-      role === 'super_admin' ? '/platform' : role === 'admin' ? '/admin' : '/dashboard'
-    );
+    // Cleared mustChangePassword server-side; land on the right dashboard,
+    // using the same table as sign-in rather than a second copy of the rule.
+    router.push(homeFor(role));
     router.refresh();
   }
 

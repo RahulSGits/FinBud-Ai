@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { CallStatus, CampaignStatus, Prisma } from '@prisma/client';
 import { db } from '@/lib/db';
+import { auditData } from '@/lib/audit';
 import { AuthError, requireUser } from '@/lib/auth';
 import { assertOwner, errorResponse, isAdmin, requireCompany, visibleCampaigns } from '@/lib/authz';
 import { parseBusinessHours } from '@/lib/campaigns/business-hours';
@@ -122,7 +123,7 @@ export async function POST(req: NextRequest) {
   }
 
   await db.auditLog.create({
-    data: { action: 'campaign.created', entity: 'Campaign', entityId: campaign.id, userId: user.id, meta: { attached } },
+    data: auditData(user, { action: 'campaign.created', entity: 'Campaign', entityId: campaign.id, meta: { attached } }),
   });
   return NextResponse.json({ ...campaign, attached }, { status: 201 });
 }

@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { UserStatus } from '@prisma/client';
 import { db } from '@/lib/db';
+import { auditData } from '@/lib/audit';
 import { createSession, hashPassword, hashToken, validatePassword } from '@/lib/auth';
 
 /**
@@ -64,7 +65,7 @@ export async function POST(req: NextRequest) {
     });
 
     await tx.auditLog.create({
-      data: { action: 'invite.accepted', entity: 'User', entityId: u.id, userId: u.id },
+      data: auditData(u, { action: 'invite.accepted', entity: 'User', entityId: u.id }),
     });
 
     return u;

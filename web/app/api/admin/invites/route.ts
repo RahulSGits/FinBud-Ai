@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { Role, UserStatus } from '@prisma/client';
 import { db } from '@/lib/db';
+import { auditData } from '@/lib/audit';
 import { AuthError, createInviteToken, requireAdmin, type SessionUser } from '@/lib/auth';
 import { requireCompany } from '@/lib/authz';
 import { sendInviteEmail } from '@/lib/email';
@@ -104,13 +105,12 @@ export async function POST(req: NextRequest) {
     });
 
     await tx.auditLog.create({
-      data: {
+      data: auditData(admin, {
         action: existing ? 'invite.resent' : 'invite.created',
         entity: 'User',
         entityId: u.id,
         meta: { email, role, employeeId },
-        userId: admin.id,
-      },
+      }),
     });
 
     return u;

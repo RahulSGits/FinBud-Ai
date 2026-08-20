@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { db } from '@/lib/db';
+import { auditData } from '@/lib/audit';
 import { AuthError, requireUser } from '@/lib/auth';
 import { assertOwner, errorResponse, requireCompany, visibleAgents } from '@/lib/authz';
 import { defaultProviderId } from '@/lib/providers';
@@ -78,7 +79,7 @@ export async function POST(req: NextRequest) {
   });
 
   await db.auditLog.create({
-    data: { action: 'agent.created', entity: 'Agent', entityId: agent.id, userId: user.id },
+    data: auditData(user, { action: 'agent.created', entity: 'Agent', entityId: agent.id }),
   });
 
   // Push to the execution engine. Non-fatal: a sync failure is recorded and
@@ -109,7 +110,7 @@ export async function PATCH(req: NextRequest) {
 
   const agent = await db.agent.update({ where: { id: body.id }, data: pick(body) });
   await db.auditLog.create({
-    data: { action: 'agent.updated', entity: 'Agent', entityId: agent.id, userId: user.id },
+    data: auditData(user, { action: 'agent.updated', entity: 'Agent', entityId: agent.id }),
   });
 
   // Live synchronisation: every edit is pushed to the engine immediately, so
@@ -152,6 +153,6 @@ export async function DELETE(req: NextRequest) {
   if (agent) await unsyncAgent(agent);   // best-effort remove from the engine
 
   await db.agent.delete({ where: { id } });
-  await db.auditLog.create({ data: { action: 'agent.deleted', entity: 'Agent', entityId: id, userId: user.id } });
+  await db.auditLog.create({ data: auditData(user, { action: 'agent.deleted', entity: 'Agent', entityId: id }) });
   return NextResponse.json({ ok: true });
 }

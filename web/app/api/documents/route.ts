@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { randomUUID } from 'crypto';
 import { DocumentStatus } from '@prisma/client';
 import { db } from '@/lib/db';
+import { auditData } from '@/lib/audit';
 import { AuthError, requireAdmin, requireUser, type SessionUser } from '@/lib/auth';
 import { requireCompany } from '@/lib/authz';
 import { chunkText } from '@/lib/knowledge/chunk';
@@ -187,13 +188,12 @@ export async function POST(req: NextRequest) {
     });
 
     await db.auditLog.create({
-      data: {
+      data: auditData(user, {
         action: 'document.uploaded',
         entity: 'Document',
         entityId: document.id,
-        userId: user.id,
         meta: { name, sizeBytes: buffer.byteLength, chunks: chunks.length, embedded },
-      },
+      }),
     });
 
     const fresh = await db.document.findUnique({
@@ -344,13 +344,12 @@ async function importFromUrl(req: NextRequest, user: SessionUser): Promise<NextR
 
     await db.document.update({ where: { id: document.id }, data: { status: DocumentStatus.ready, error: null } });
     await db.auditLog.create({
-      data: {
+      data: auditData(user, {
         action: 'document.imported',
         entity: 'Document',
         entityId: document.id,
-        userId: user.id,
         meta: { url: rawUrl, host, pages: crawl.pages.length, chunks: chunks.length, embedded },
-      },
+      }),
     });
 
     const fresh = await db.document.findUnique({
@@ -398,13 +397,12 @@ export async function DELETE(req: NextRequest) {
   // Chunks cascade with the document.
   await db.document.delete({ where: { id } });
   await db.auditLog.create({
-    data: {
+    data: auditData(user, {
       action: 'document.deleted',
       entity: 'Document',
       entityId: id,
-      userId: user.id,
       meta: { name: document.name },
-    },
+    }),
   });
 
   return NextResponse.json({ ok: true });

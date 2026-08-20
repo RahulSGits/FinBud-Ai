@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { CompanyStatus } from '@prisma/client';
 import { db } from '@/lib/db';
+import { auditData } from '@/lib/audit';
 import { requireUser, type SessionUser } from '@/lib/auth';
 import { assertSuperAdmin, errorResponse } from '@/lib/authz';
 
@@ -75,13 +76,21 @@ export async function PATCH(req: NextRequest, { params }: { params: { id: string
   const data: Record<string, unknown> = {};
   const changed: string[] = [];
 
-  if (typeof body.name === 'string' && body.name.trim()) {
+  // Only genuine differences are recorded. The editor sends every field on
+  // every save, so counting what was *sent* claimed ten changes when three
+  // happened — and that inflated list is what the audit log keeps. A trail that
+  // overstates what changed is worse than none: it cannot be trusted the one
+  // time somebody needs to know who altered a limit.
+  if (typeof body.name === 'string' && body.name.trim() && body.name.trim() !== existing.name) {
     data.name = body.name.trim();
-    changed.push('name');
+    changed.push(`name:${existing.name}->${body.name.trim()}`);
   }
   if (body.plan !== undefined) {
-    data.plan = body.plan ? String(body.plan).slice(0, 60) : null;
-    changed.push('plan');
+    const next = body.plan ? String(body.plan).slice(0, 60) : null;
+    if (next !== existing.plan) {
+      data.plan = next;
+      changed.push(`plan:${existing.plan ?? 'none'}->${next ?? 'none'}`);
+    }
   }
 
   if (body.status !== undefined) {
@@ -89,35 +98,42 @@ export async function PATCH(req: NextRequest, { params }: { params: { id: string
     if (!Object.values(CompanyStatus).includes(next as CompanyStatus)) {
       return NextResponse.json({ error: `Unknown status "${next}"` }, { status: 400 });
     }
-    data.status = next;
-    changed.push(`status:${existing.status}->${next}`);
-    // Approving for the first time is worth a timestamp; re-activating later is
-    // not, or the record of when they joined would move.
-    if (next === CompanyStatus.active && !existing.approvedAt) data.approvedAt = new Date();
+    if (next !== existing.status) {
+      data.status = next;
+      changed.push(`status:${existing.status}->${next}`);
+      // Approving for the first time is worth a timestamp; re-activating later
+      // is not, or the record of when they joined would move.
+      if (next === CompanyStatus.active && !existing.approvedAt) data.approvedAt = new Date();
+    }
   }
 
   for (const f of LIMIT_FIELDS) {
     const v = readLimit((body as Record<string, unknown>)[f]);
-    if (v !== undefined) {
+    if (v !== undefined && v !== existing[f]) {
       data[f] = v;
-      changed.push(`${f}=${v ?? 'unlimited'}`);
+      changed.push(`${f}:${existing[f] ?? 'unlimited'}->${v ?? 'unlimited'}`);
     }
   }
 
-  if (!changed.length) return NextResponse.json({ error: 'Nothing to change' }, { status: 400 });
+  // Saving a form nobody edited is not an error, and refusing it would make
+  // the editor look broken. It simply has nothing to record.
+  if (!changed.length) {
+    return NextResponse.json({ company: existing, changed: [] });
+  }
 
   const company = await db.company.update({ where: { id: params.id }, data });
 
   await db.auditLog.create({
-    data: {
+    data: auditData(actor, {
       action: 'company.updated',
       entity: 'Company',
       entityId: company.id,
-      userId: actor.id,
-      // Not scoped to the company: this is a platform-owner action, and
-      // AuditLog.companyId is nullable precisely for these.
+      // Filed under the company, not the owner, who belongs to none. A plan
+      // change or a suspension is that customer's history even though somebody
+      // outside it made the change.
+      companyId: company.id,
       meta: { changed },
-    },
+    }),
   }).catch(() => undefined);
 
   return NextResponse.json({ company, changed });

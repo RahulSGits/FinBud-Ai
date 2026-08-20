@@ -11,6 +11,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { CallStatus, ContactStatus, LeadStatus, Prisma } from '@prisma/client';
 import { db } from '@/lib/db';
+import { auditData } from '@/lib/audit';
 import { requireUser, type SessionUser } from '@/lib/auth';
 import { errorResponse, visibleCalls, visibleCampaigns, visibleContacts } from '@/lib/authz';
 import {
@@ -539,11 +540,10 @@ export async function GET(req: NextRequest) {
   // Exporting the customer list is precisely the action you want a trail for:
   // who pulled what, how much of it, and with which filters applied.
   await db.auditLog.create({
-    data: {
+    data: auditData(user, {
       action: 'data.exported',
       entity: 'Export',
       entityId: kind === 'campaign' ? campaignId : null,
-      userId: user.id,
       meta: {
         kind,
         format,
@@ -556,7 +556,7 @@ export async function GET(req: NextRequest) {
           q: q ?? null,
         },
       },
-    },
+    }),
   });
 
   return new NextResponse(body, {

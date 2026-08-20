@@ -5,7 +5,8 @@ import { usePathname, useRouter } from 'next/navigation';
 import { useState } from 'react';
 import {
   LayoutDashboard, BarChart3, Bot, Users, Megaphone, PhoneCall, FileText,
-  UserCog, Settings, LogOut, Menu, X, TrendingUp, MessageSquare, type LucideIcon,
+  UserCog, Settings, LogOut, Menu, X, TrendingUp, MessageSquare, Building2,
+  ScrollText, Activity, ArrowLeft, type LucideIcon,
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { useAuth } from '@/lib/auth-context';
@@ -51,6 +52,26 @@ const ADMIN_NAV: NavGroup[] = [
   },
 ];
 
+/**
+ * The platform owner's area. Deliberately short: this is a landlord's view of
+ * the building, not a second copy of the company application.
+ */
+const PLATFORM_NAV: NavGroup[] = [
+  {
+    items: [
+      { href: '/platform', label: 'Overview', icon: LayoutDashboard },
+      { href: '/platform/companies', label: 'Companies', icon: Building2 },
+    ],
+  },
+  {
+    heading: 'Operations',
+    items: [
+      { href: '/platform/audit', label: 'Audit log', icon: ScrollText },
+      { href: '/platform/health', label: 'System health', icon: Activity },
+    ],
+  },
+];
+
 const EMPLOYEE_NAV: NavGroup[] = [
   {
     items: [{ href: '/dashboard', label: 'My Day', icon: LayoutDashboard }],
@@ -75,20 +96,39 @@ const EMPLOYEE_NAV: NavGroup[] = [
 // The two landing routes are prefixes of every other route in their section, so
 // they only ever match exactly — otherwise /dashboard would light up while
 // you're on /dashboard/agents.
-const INDEX_ROUTES = ['/admin', '/dashboard'];
+const INDEX_ROUTES = ['/admin', '/dashboard', '/platform'];
 
 function isActive(pathname: string, href: string): boolean {
   if (INDEX_ROUTES.includes(href)) return pathname === href;
   return pathname === href || pathname.startsWith(`${href}/`);
 }
 
-export function Nav({ variant }: { variant: 'admin' | 'employee' }) {
+const NAV_BY_VARIANT: Record<'admin' | 'employee' | 'platform', NavGroup[]> = {
+  admin: ADMIN_NAV,
+  employee: EMPLOYEE_NAV,
+  platform: PLATFORM_NAV,
+};
+
+const ROLE_LABEL: Record<string, string> = {
+  super_admin: 'Platform owner',
+  admin: 'Administrator',
+  manager: 'Manager',
+  employee: 'Employee',
+  viewer: 'Viewer',
+};
+
+export function Nav({ variant }: { variant: 'admin' | 'employee' | 'platform' }) {
   const pathname = usePathname();
   const router = useRouter();
   const { user, signOut } = useAuth();
   const [open, setOpen] = useState(false);
 
-  const groups = variant === 'admin' ? ADMIN_NAV : EMPLOYEE_NAV;
+  const groups = NAV_BY_VARIANT[variant];
+
+  // The platform owner can walk into a company's own area to support it. This
+  // is their way back out: without it the only route home is the URL bar,
+  // because every link inside a company points further into that company.
+  const showReturnToPlatform = user?.role === 'super_admin' && variant !== 'platform';
 
   return (
     <>
@@ -150,11 +190,20 @@ export function Nav({ variant }: { variant: 'admin' | 'employee' }) {
         </nav>
 
         <div className="pt-3 border-t border-slate-200 dark:border-white/10">
+          {showReturnToPlatform && (
+            <Link
+              href="/platform"
+              onClick={() => setOpen(false)}
+              className="mb-2 flex items-center gap-3 px-3 py-2 rounded-xl text-sm font-medium text-brand-700 dark:text-brand-400 bg-brand-500/10 hover:bg-brand-500/15 transition-colors"
+            >
+              <ArrowLeft className="w-4 h-4 shrink-0" /> Back to platform
+            </Link>
+          )}
           <div className="flex items-center justify-between px-3 py-2 gap-2">
             <div className="min-w-0">
               <p className="text-sm font-medium text-slate-900 dark:text-white truncate">{user?.name}</p>
               <p className="text-xs text-slate-500 dark:text-slate-400 truncate">
-                {user?.role === 'admin' ? 'Administrator' : 'Employee'}
+                {ROLE_LABEL[user?.role ?? ''] ?? 'Employee'}
               </p>
             </div>
             <ThemeToggle />

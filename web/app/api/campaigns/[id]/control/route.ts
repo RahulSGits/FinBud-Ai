@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { CampaignStatus, ContactStatus } from '@prisma/client';
 import { db } from '@/lib/db';
+import { auditData } from '@/lib/audit';
 import { AuthError, requireUser } from '@/lib/auth';
 import { assertOwner, errorResponse } from '@/lib/authz';
 import { tickCampaign } from '@/lib/campaigns/runner';
@@ -115,7 +116,7 @@ export async function POST(req: NextRequest, { params }: { params: { id: string 
   });
 
   await db.auditLog.create({
-    data: { action: `campaign.${action}`, entity: 'Campaign', entityId: campaign.id, userId: user.id, meta: { total } },
+    data: auditData(user, { action: `campaign.${action}`, entity: 'Campaign', entityId: campaign.id, meta: { total } }),
   });
 
   // Dial immediately so the user sees movement instead of waiting for a tick.
